@@ -89,6 +89,7 @@ final class AppModel: ObservableObject {
 
     func refresh() async {
         guard !isRefreshing, let catalog else { return }
+        locationService.requestLocation()
         isRefreshing = true
         lastRefreshAttempt = Date()
         defer { isRefreshing = false }

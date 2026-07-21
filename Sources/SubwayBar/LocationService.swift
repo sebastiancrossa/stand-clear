@@ -22,7 +22,6 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         case .notDetermined:
             manager.requestWhenInUseAuthorization()
         case .authorized, .authorizedAlways:
-            manager.startUpdatingLocation()
             manager.requestLocation()
         case .denied, .restricted:
             locationError = "Location access is off for SubwayBar."

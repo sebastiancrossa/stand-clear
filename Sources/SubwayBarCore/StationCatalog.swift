@@ -139,19 +139,27 @@ public struct StationCatalog: Sendable {
     }
 
     public static func bundled() throws -> StationCatalog {
-        guard let stopsURL = Bundle.module.url(forResource: "stops", withExtension: "txt") else {
+        let dataBundle = packagedResourceBundle() ?? Bundle.module
+        guard let stopsURL = dataBundle.url(forResource: "stops", withExtension: "txt") else {
             throw StationCatalogError.missingBundledStops
         }
-        guard let routesURL = Bundle.module.url(forResource: "station_routes", withExtension: "csv") else {
+        guard let routesURL = dataBundle.url(forResource: "station_routes", withExtension: "csv") else {
             throw StationCatalogError.missingBundledRoutes
         }
-        guard let transfersURL = Bundle.module.url(forResource: "transfers", withExtension: "txt") else {
+        guard let transfersURL = dataBundle.url(forResource: "transfers", withExtension: "txt") else {
             throw StationCatalogError.missingBundledTransfers
         }
         return try StationCatalog(
             csv: String(contentsOf: stopsURL, encoding: .utf8),
             stationRoutesCSV: String(contentsOf: routesURL, encoding: .utf8),
             transfersCSV: String(contentsOf: transfersURL, encoding: .utf8)
+        )
+    }
+
+    private static func packagedResourceBundle() -> Bundle? {
+        guard let resourcesURL = Bundle.main.resourceURL else { return nil }
+        return Bundle(
+            url: resourcesURL.appendingPathComponent("SubwayBar_SubwayBarCore.bundle", isDirectory: true)
         )
     }
 
