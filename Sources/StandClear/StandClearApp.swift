@@ -22,6 +22,7 @@ struct StandClearApp: App {
                 case let .text(text):
                     Text(text)
                         .monospacedDigit()
+                        .frame(width: 88, alignment: .leading)
                 }
             }
             .accessibilityLabel(model.menuBarPresentation.accessibilityLabel)
