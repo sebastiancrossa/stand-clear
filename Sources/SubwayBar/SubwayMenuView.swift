@@ -320,16 +320,26 @@ private struct ArrivalListView: View {
 }
 
 private struct ArrivalRow: View {
+    @State private var showsExactSeconds = false
+
     let arrival: Arrival
     let now: Date
+
+    private var displayedETA: String {
+        showsExactSeconds
+            ? arrival.exactETASecondsText(relativeTo: now)
+            : arrival.etaText(relativeTo: now)
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             RouteBullet(routeID: arrival.routeID, size: 46, isSelected: true)
+                .accessibilityHidden(true)
 
             Text(arrival.direction.arrow)
                 .font(.system(size: 38, weight: .light, design: .rounded))
                 .frame(width: 34)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(arrival.destination.uppercased())
@@ -339,21 +349,35 @@ private struct ArrivalRow: View {
                     .font(.system(size: 9, weight: .semibold, design: .rounded))
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "\(arrival.routeID) train \(arrival.direction.rawValue) to \(arrival.destination)"
+            )
 
             Spacer(minLength: 8)
 
-            Text(arrival.etaText(relativeTo: now))
-                .font(.system(size: 24, weight: .regular, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
+            Button {
+                showsExactSeconds.toggle()
+            } label: {
+                Text(displayedETA)
+                    .font(.system(size: 24, weight: .regular, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(minWidth: 86, minHeight: 48, alignment: .trailing)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(showsExactSeconds ? "Show rounded arrival time" : "Show exact seconds")
+            .accessibilityLabel("Arrival time")
+            .accessibilityValue(displayedETA)
+            .accessibilityHint(
+                showsExactSeconds
+                    ? "Click to show the rounded arrival time."
+                    : "Click to show the exact time in seconds."
+            )
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(arrival.routeID) train \(arrival.direction.rawValue) to \(arrival.destination), \(arrival.etaText(relativeTo: now))"
-        )
     }
 }
 

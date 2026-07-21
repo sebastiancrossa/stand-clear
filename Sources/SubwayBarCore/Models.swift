@@ -88,6 +88,11 @@ public struct Arrival: Identifiable, Hashable, Sendable {
         }
         return "\(Int(ceil(seconds / 60))) min"
     }
+
+    public func exactETASecondsText(relativeTo now: Date = Date()) -> String {
+        let seconds = max(0, Int(ceil(arrivalTime.timeIntervalSince(now))))
+        return "\(seconds) sec"
+    }
 }
 
 public struct FeedSnapshot: Sendable {
