@@ -2,7 +2,13 @@ import SwiftUI
 
 @main
 struct SubwayBarApp: App {
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
+
+    init() {
+        let model = AppModel()
+        _model = StateObject(wrappedValue: model)
+        Task { @MainActor in model.start() }
+    }
 
     var body: some Scene {
         MenuBarExtra {
@@ -14,4 +20,3 @@ struct SubwayBarApp: App {
         .menuBarExtraStyle(.window)
     }
 }
-

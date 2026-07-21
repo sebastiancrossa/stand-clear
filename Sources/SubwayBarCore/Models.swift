@@ -95,17 +95,30 @@ public struct FeedSnapshot: Sendable {
 public enum RouteID {
     public static let displayOrder = [
         "A", "C", "E", "B", "D", "F", "M", "G", "L", "J", "Z",
-        "N", "Q", "R", "W", "1", "2", "3", "4", "5", "6", "7", "S", "SI",
+        "N", "Q", "R", "W", "1", "2", "3", "4", "5", "5X", "6", "6X",
+        "7", "7X", "FX", "H", "FS", "GS", "SI",
     ]
 
     public static func normalized(_ routeID: String) -> String {
-        switch routeID.uppercased() {
-        case "5X": "5"
-        case "6X": "6"
-        case "7X": "7"
-        case "FS", "GS", "H": "S"
-        default: routeID.uppercased()
+        routeID.uppercased()
+    }
+
+    public static func baseLine(_ routeID: String) -> String {
+        let routeID = normalized(routeID)
+        return isExpress(routeID) ? String(routeID.dropLast()) : routeID
+    }
+
+    public static func displayLabel(_ routeID: String) -> String {
+        switch normalized(routeID) {
+        case "H": "SR"
+        case "FS": "SF"
+        case "GS": "S"
+        default: baseLine(routeID)
         }
+    }
+
+    public static func isExpress(_ routeID: String) -> Bool {
+        normalized(routeID).hasSuffix("X")
     }
 
     public static func sorted(_ routeIDs: some Sequence<String>) -> [String] {
@@ -126,11 +139,27 @@ public enum ArrivalBoard {
         now: Date = Date(),
         limit: Int = 16
     ) -> [Arrival] {
+        arrivals(
+            from: allArrivals,
+            atAny: [stationID],
+            selectedRoutes: selectedRoutes,
+            now: now,
+            limit: limit
+        )
+    }
+
+    public static func arrivals(
+        from allArrivals: [Arrival],
+        atAny stationIDs: Set<String>,
+        selectedRoutes: Set<String>,
+        now: Date = Date(),
+        limit: Int = 16
+    ) -> [Arrival] {
         let normalizedSelection = Set(selectedRoutes.map(RouteID.normalized))
         return Array(
             allArrivals
                 .filter {
-                    $0.stationID == stationID
+                    stationIDs.contains($0.stationID)
                         && $0.arrivalTime >= now.addingTimeInterval(-30)
                         && normalizedSelection.contains($0.routeID)
                 }

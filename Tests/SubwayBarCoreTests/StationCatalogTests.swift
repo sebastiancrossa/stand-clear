@@ -35,6 +35,8 @@ final class StationCatalogTests: XCTestCase {
 
         XCTAssertGreaterThan(catalog.stations.count, 450)
         XCTAssertNotNil(catalog.station(id: "127"))
+        XCTAssertTrue(catalog.relatedStations(to: "R16").contains("127"))
+        XCTAssertTrue(catalog.relatedStations(to: "R16").contains("A27"))
+        XCTAssertTrue(catalog.routes(serving: "R16").isSuperset(of: ["1", "2", "3", "7", "A", "C", "E", "N", "Q", "R", "W"]))
     }
 }
-

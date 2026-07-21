@@ -1,3 +1,4 @@
+import SubwayBarCore
 import SwiftUI
 
 struct RouteStyle {
@@ -5,7 +6,7 @@ struct RouteStyle {
     let foreground: Color
 
     static func style(for routeID: String) -> RouteStyle {
-        switch routeID {
+        switch RouteID.baseLine(routeID) {
         case "A", "C", "E": RouteStyle(background: Color(hex: 0x0039A6), foreground: .white)
         case "B", "D", "F", "M": RouteStyle(background: Color(hex: 0xFF6319), foreground: .white)
         case "G": RouteStyle(background: Color(hex: 0x6CBE45), foreground: .white)
@@ -14,6 +15,7 @@ struct RouteStyle {
         case "1", "2", "3": RouteStyle(background: Color(hex: 0xEE352E), foreground: .white)
         case "4", "5", "6": RouteStyle(background: Color(hex: 0x00933C), foreground: .white)
         case "7": RouteStyle(background: Color(hex: 0xB933AD), foreground: .white)
+        case "SI": RouteStyle(background: Color(hex: 0x0039A6), foreground: .white)
         default: RouteStyle(background: Color(hex: 0x808183), foreground: .white)
         }
     }
@@ -30,4 +32,3 @@ extension Color {
         )
     }
 }
-

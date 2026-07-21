@@ -3,12 +3,16 @@ import Foundation
 
 public enum StationCatalogError: LocalizedError {
     case missingBundledStops
+    case missingBundledRoutes
+    case missingBundledTransfers
     case invalidHeader
     case noStations
 
     public var errorDescription: String? {
         switch self {
         case .missingBundledStops: "The bundled MTA station list is missing."
+        case .missingBundledRoutes: "The bundled MTA station route list is missing."
+        case .missingBundledTransfers: "The bundled MTA transfer list is missing."
         case .invalidHeader: "The MTA station list has an unexpected format."
         case .noStations: "The MTA station list did not contain any stations."
         }
@@ -19,8 +23,10 @@ public struct StationCatalog: Sendable {
     public let stations: [Station]
     private let stationsByID: [String: Station]
     private let parentByStopID: [String: String]
+    private let routesByStationID: [String: Set<String>]
+    private let relatedStationIDs: [String: Set<String>]
 
-    public init(csv: String) throws {
+    public init(csv: String, stationRoutesCSV: String? = nil, transfersCSV: String? = nil) throws {
         let lines = csv.split(whereSeparator: \Character.isNewline).map(String.init)
         guard let header = lines.first else {
             throw StationCatalogError.invalidHeader
@@ -76,13 +82,77 @@ public struct StationCatalog: Sendable {
         stations = parsedStations
         stationsByID = Dictionary(uniqueKeysWithValues: parsedStations.map { ($0.id, $0) })
         parentByStopID = parsedParents
+
+        var parsedRoutes: [String: Set<String>] = [:]
+        if let stationRoutesCSV {
+            for line in stationRoutesCSV.split(whereSeparator: \Character.isNewline).dropFirst() {
+                let values = line.split(separator: ",", maxSplits: 1).map(String.init)
+                guard values.count == 2 else { continue }
+                parsedRoutes[values[0], default: []].insert(RouteID.normalized(values[1]))
+            }
+        }
+        routesByStationID = parsedRoutes
+
+        var unionParents = Dictionary(uniqueKeysWithValues: parsedStations.map { ($0.id, $0.id) })
+
+        func root(of id: String, in parents: inout [String: String]) -> String {
+            var current = id
+            while let parent = parents[current], parent != current {
+                current = parent
+            }
+            let root = current
+            current = id
+            while let parent = parents[current], parent != current {
+                parents[current] = root
+                current = parent
+            }
+            return root
+        }
+
+        if let transfersCSV {
+            for line in transfersCSV.split(whereSeparator: \Character.isNewline).dropFirst() {
+                let values = line.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+                guard
+                    values.count >= 2,
+                    unionParents[values[0]] != nil,
+                    unionParents[values[1]] != nil
+                else { continue }
+                let fromRoot = root(of: values[0], in: &unionParents)
+                let toRoot = root(of: values[1], in: &unionParents)
+                if fromRoot != toRoot {
+                    unionParents[toRoot] = fromRoot
+                }
+            }
+        }
+
+        var groups: [String: Set<String>] = [:]
+        for station in parsedStations {
+            groups[root(of: station.id, in: &unionParents), default: []].insert(station.id)
+        }
+        var parsedRelated: [String: Set<String>] = [:]
+        for group in groups.values {
+            for stationID in group {
+                parsedRelated[stationID] = group
+            }
+        }
+        relatedStationIDs = parsedRelated
     }
 
     public static func bundled() throws -> StationCatalog {
-        guard let url = Bundle.module.url(forResource: "stops", withExtension: "txt") else {
+        guard let stopsURL = Bundle.module.url(forResource: "stops", withExtension: "txt") else {
             throw StationCatalogError.missingBundledStops
         }
-        return try StationCatalog(csv: String(contentsOf: url, encoding: .utf8))
+        guard let routesURL = Bundle.module.url(forResource: "station_routes", withExtension: "csv") else {
+            throw StationCatalogError.missingBundledRoutes
+        }
+        guard let transfersURL = Bundle.module.url(forResource: "transfers", withExtension: "txt") else {
+            throw StationCatalogError.missingBundledTransfers
+        }
+        return try StationCatalog(
+            csv: String(contentsOf: stopsURL, encoding: .utf8),
+            stationRoutesCSV: String(contentsOf: routesURL, encoding: .utf8),
+            transfersCSV: String(contentsOf: transfersURL, encoding: .utf8)
+        )
     }
 
     public func station(id: String) -> Station? {
@@ -103,6 +173,16 @@ public struct StationCatalog: Sendable {
     public func stationName(forStopID stopID: String) -> String? {
         guard let id = stationID(forStopID: stopID) else { return nil }
         return stationsByID[id]?.name
+    }
+
+    public func relatedStations(to stationID: String) -> Set<String> {
+        relatedStationIDs[stationID] ?? [stationID]
+    }
+
+    public func routes(serving stationID: String) -> Set<String> {
+        relatedStations(to: stationID).reduce(into: Set<String>()) { routes, relatedID in
+            routes.formUnion(routesByStationID[relatedID] ?? [])
+        }
     }
 
     public func nearest(to location: CLLocation) -> (station: Station, distance: CLLocationDistance)? {
@@ -139,4 +219,3 @@ public struct StationCatalog: Sendable {
         return fields
     }
 }
-

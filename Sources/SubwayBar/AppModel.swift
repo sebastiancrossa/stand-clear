@@ -26,6 +26,7 @@ final class AppModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var hasStarted = false
     private var lastRefreshAttempt: Date?
+    private var userEditedSelection = false
 
     private enum DefaultsKey {
         static let selectedRoutes = "selectedRoutes"
@@ -65,10 +66,10 @@ final class AppModel: ObservableObject {
     }
 
     var displayedArrivals: [Arrival] {
-        guard let station = nearestStation else { return [] }
+        guard let station = nearestStation, let catalog else { return [] }
         return ArrivalBoard.arrivals(
             from: allArrivals,
-            at: station.id,
+            atAny: catalog.relatedStations(to: station.id),
             selectedRoutes: selectedRoutes,
             now: now
         )
@@ -76,7 +77,7 @@ final class AppModel: ObservableObject {
 
     var menuBarTitle: String {
         guard let arrival = displayedArrivals.first else { return "Subway" }
-        return "\(arrival.routeID) \(arrival.etaText(relativeTo: now))"
+        return "\(RouteID.displayLabel(arrival.routeID)) \(arrival.etaText(relativeTo: now))"
     }
 
     func start() {
@@ -107,6 +108,7 @@ final class AppModel: ObservableObject {
 
     func toggleRoute(_ routeID: String) {
         let routeID = RouteID.normalized(routeID)
+        userEditedSelection = true
         if selectedRoutes.contains(routeID) {
             selectedRoutes.remove(routeID)
         } else {
@@ -134,15 +136,9 @@ final class AppModel: ObservableObject {
 
     private func updateNearestStation(for location: CLLocation) {
         guard let nearest = catalog?.nearest(to: location) else { return }
-        let stationChanged = nearestStation?.id != nearest.station.id
         nearestStation = nearest.station
         distanceToStation = nearest.distance
         updateAvailableRoutes()
-
-        if stationChanged, !availableRoutes.isEmpty, selectedRoutes.intersection(availableRoutes).isEmpty {
-            selectedRoutes = Set(availableRoutes)
-            persistSelection()
-        }
     }
 
     private func updateAvailableRoutes() {
@@ -150,11 +146,9 @@ final class AppModel: ObservableObject {
             availableRoutes = []
             return
         }
-        availableRoutes = RouteID.sorted(
-            allArrivals.lazy.filter { $0.stationID == station.id }.map(\.routeID)
-        )
+        availableRoutes = RouteID.sorted(catalog?.routes(serving: station.id) ?? [])
 
-        if !defaults.bool(forKey: DefaultsKey.hasConfiguredLines), selectedRoutes.isEmpty {
+        if !defaults.bool(forKey: DefaultsKey.hasConfiguredLines), !userEditedSelection {
             selectedRoutes = Set(availableRoutes)
             persistSelection()
         }
@@ -164,4 +158,3 @@ final class AppModel: ObservableObject {
         defaults.set(RouteID.sorted(selectedRoutes), forKey: DefaultsKey.selectedRoutes)
     }
 }
-

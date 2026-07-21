@@ -314,15 +314,30 @@ private struct RouteBullet: View {
 
     var body: some View {
         let style = RouteStyle.style(for: routeID)
-        Text(routeID)
-            .font(.system(size: size * 0.53, weight: .heavy, design: .rounded))
-            .minimumScaleFactor(0.6)
-            .foregroundStyle(style.foreground)
-            .frame(width: size, height: size)
-            .background(style.background, in: Circle())
-            .overlay {
-                Circle().stroke(Color.white.opacity(isSelected ? 0 : 0.28), lineWidth: 1)
+        ZStack {
+            if RouteID.isExpress(routeID) {
+                RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
+                    .fill(style.background)
+                    .overlay {
+                        RoundedRectangle(cornerRadius: size * 0.08, style: .continuous)
+                            .stroke(Color.white.opacity(isSelected ? 0 : 0.28), lineWidth: 1)
+                    }
+                    .frame(width: size * 0.72, height: size * 0.72)
+                    .rotationEffect(.degrees(45))
+            } else {
+                Circle()
+                    .fill(style.background)
+                    .overlay {
+                        Circle().stroke(Color.white.opacity(isSelected ? 0 : 0.28), lineWidth: 1)
+                    }
             }
+
+            Text(RouteID.displayLabel(routeID))
+                .font(.system(size: size * (RouteID.displayLabel(routeID).count > 1 ? 0.36 : 0.53), weight: .heavy, design: .rounded))
+                .minimumScaleFactor(0.6)
+                .foregroundStyle(style.foreground)
+        }
+            .frame(width: size, height: size)
             .opacity(isSelected ? 1 : 0.24)
             .scaleEffect(isSelected ? 1 : 0.9)
             .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: isSelected)
