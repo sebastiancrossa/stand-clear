@@ -41,7 +41,7 @@ public struct MTAClient {
                     do {
                         var request = URLRequest(url: url)
                         request.timeoutInterval = 12
-                        request.setValue("SubwayBar/1.0", forHTTPHeaderField: "User-Agent")
+                        request.setValue("StandClear/1.0", forHTTPHeaderField: "User-Agent")
                         let (data, response) = try await session.data(for: request)
                         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                             throw MTAFeedError.invalidResponse

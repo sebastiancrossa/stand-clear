@@ -1,4 +1,4 @@
-@testable import SubwayBarCore
+@testable import StandClearCore
 import XCTest
 
 final class ArrivalBoardTests: XCTestCase {

@@ -3,30 +3,29 @@
 import PackageDescription
 
 let package = Package(
-    name: "SubwayBar",
+    name: "StandClear",
     platforms: [
         .macOS(.v14),
     ],
     products: [
-        .executable(name: "SubwayBar", targets: ["SubwayBar"]),
-        .library(name: "SubwayBarCore", targets: ["SubwayBarCore"]),
+        .executable(name: "StandClear", targets: ["StandClear"]),
+        .library(name: "StandClearCore", targets: ["StandClearCore"]),
     ],
     targets: [
         .target(
-            name: "SubwayBarCore",
+            name: "StandClearCore",
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .executableTarget(
-            name: "SubwayBar",
-            dependencies: ["SubwayBarCore"],
+            name: "StandClear",
+            dependencies: ["StandClearCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
-            name: "SubwayBarCoreTests",
-            dependencies: ["SubwayBarCore"],
+            name: "StandClearCoreTests",
+            dependencies: ["StandClearCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
     ]
 )
-

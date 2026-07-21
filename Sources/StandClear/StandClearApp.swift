@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct SubwayBarApp: App {
+struct StandClearApp: App {
     @StateObject private var model: AppModel
 
     init() {
@@ -12,7 +12,7 @@ struct SubwayBarApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            SubwayMenuView()
+            StandClearMenuView()
                 .environmentObject(model)
         } label: {
             Label(model.menuBarTitle, systemImage: "tram.fill")

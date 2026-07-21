@@ -1,5 +1,5 @@
 import CoreLocation
-@testable import SubwayBarCore
+@testable import StandClearCore
 import XCTest
 
 final class StationCatalogTests: XCTestCase {

@@ -1,8 +1,8 @@
 import CoreLocation
-import SubwayBarCore
+import StandClearCore
 import SwiftUI
 
-struct SubwayMenuView: View {
+struct StandClearMenuView: View {
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
@@ -25,7 +25,7 @@ struct SubwayMenuView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.nearestStation?.name.uppercased() ?? "SUBWAYBAR")
+                Text(model.nearestStation?.name.uppercased() ?? "STAND CLEAR")
                     .font(.system(size: 15, weight: .bold, design: .rounded))
                     .lineLimit(1)
 
@@ -64,7 +64,7 @@ struct SubwayMenuView: View {
         if let error = model.startupError {
             StatusView(
                 symbol: "exclamationmark.triangle.fill",
-                title: "Couldn’t start SubwayBar",
+                title: "Couldn’t start Stand Clear",
                 message: error,
                 actionTitle: nil,
                 action: nil
@@ -78,7 +78,7 @@ struct SubwayMenuView: View {
                     StatusView(
                         symbol: "location.slash.fill",
                         title: "Location is off",
-                        message: "Allow location access so SubwayBar can find the station closest to you. Your coordinates stay on this Mac.",
+                        message: "Allow location access so Stand Clear can find the station closest to you. Your coordinates stay on this Mac.",
                         actionTitle: "Open Location Settings",
                         action: model.openLocationSettings
                     )
@@ -87,7 +87,7 @@ struct SubwayMenuView: View {
                         StatusView(
                             symbol: "location.fill",
                             title: "Finding your station",
-                            message: "SubwayBar is waiting for a location fix and loading the latest MTA arrivals.",
+                            message: "Stand Clear is waiting for a location fix and loading the latest MTA arrivals.",
                             actionTitle: "Try Again",
                             action: model.locationService.requestLocation
                         )

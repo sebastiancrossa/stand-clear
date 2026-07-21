@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import CoreLocation
 import Foundation
-import SubwayBarCore
+import StandClearCore
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -97,7 +97,7 @@ final class AppModel: ObservableObject {
     }
 
     var menuBarTitle: String {
-        guard let arrival = displayedArrivals.first else { return "Subway" }
+        guard let arrival = displayedArrivals.first else { return "Stand Clear" }
         return "\(RouteID.displayLabel(arrival.routeID)) \(arrival.etaText(relativeTo: now))"
     }
 

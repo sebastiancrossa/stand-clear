@@ -159,7 +159,7 @@ public struct StationCatalog: Sendable {
     private static func packagedResourceBundle() -> Bundle? {
         guard let resourcesURL = Bundle.main.resourceURL else { return nil }
         return Bundle(
-            url: resourcesURL.appendingPathComponent("SubwayBar_SubwayBarCore.bundle", isDirectory: true)
+            url: resourcesURL.appendingPathComponent("StandClear_StandClearCore.bundle", isDirectory: true)
         )
     }
 

@@ -1,6 +1,6 @@
-# SubwayBar MVP
+# Stand Clear MVP
 
-SubwayBar is a macOS menu bar app for checking nearby NYC subway arrivals at a glance.
+Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a glance.
 
 ## Required behavior
 

@@ -1,4 +1,4 @@
-# SubwayBar
+# Stand Clear
 
 A small native macOS menu bar app that finds the closest NYC subway station and shows live ETAs for the lines you care about.
 
@@ -13,14 +13,14 @@ The interface is inspired by [Closing Doors](https://www.closingdoors.nyc/us-ny-
 
 ```sh
 swift test
-swift run SubwayBar
+swift run StandClear
 ```
 
 Running through SwiftPM is useful for development, but location permission requires the bundled app build:
 
 ```sh
 make app
-open dist/SubwayBar.app
+open dist/StandClear.app
 ```
 
 On first launch, the app opens directly to the direction-and-line picker with every option unselected. After choosing at least one direction and line, those filters are saved for later launches. The picker includes the complete subway route catalog, rather than only the lines at the nearest station.
@@ -37,7 +37,7 @@ make refresh-stops
 
 ## Privacy
 
-SubwayBar uses Core Location to choose a nearby station. Coordinates stay on the Mac and are never sent to the MTA or any other service.
+Stand Clear uses Core Location to choose a nearby station. Coordinates stay on the Mac and are never sent to the MTA or any other service.
 
 ## Data and trademarks
 

@@ -1,5 +1,5 @@
 import Foundation
-@testable import SubwayBarCore
+@testable import StandClearCore
 import XCTest
 
 final class GTFSRealtimeParserTests: XCTestCase {

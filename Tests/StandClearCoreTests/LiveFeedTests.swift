@@ -1,10 +1,10 @@
-@testable import SubwayBarCore
+@testable import StandClearCore
 import XCTest
 
 final class LiveFeedTests: XCTestCase {
     func testOfficialMTAFeedsProduceMappedArrivals() async throws {
-        guard ProcessInfo.processInfo.environment["SUBWAYBAR_LIVE_TEST"] == "1" else {
-            throw XCTSkip("Set SUBWAYBAR_LIVE_TEST=1 to call the live MTA feeds.")
+        guard ProcessInfo.processInfo.environment["STAND_CLEAR_LIVE_TEST"] == "1" else {
+            throw XCTSkip("Set STAND_CLEAR_LIVE_TEST=1 to call the live MTA feeds.")
         }
 
         let catalog = try StationCatalog.bundled()
