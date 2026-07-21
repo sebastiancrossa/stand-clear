@@ -15,7 +15,17 @@ struct StandClearApp: App {
             StandClearMenuView()
                 .environmentObject(model)
         } label: {
-            Label(model.menuBarTitle, systemImage: "tram.fill")
+            Group {
+                switch model.menuBarPresentation.content {
+                case .icon:
+                    Image(systemName: "tram.fill")
+                case let .text(text):
+                    Text(text)
+                        .monospacedDigit()
+                        .frame(width: 88, alignment: .leading)
+                }
+            }
+            .accessibilityLabel(model.menuBarPresentation.accessibilityLabel)
         }
         .menuBarExtraStyle(.window)
     }

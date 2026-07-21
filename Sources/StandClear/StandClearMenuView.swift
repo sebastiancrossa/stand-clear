@@ -129,6 +129,17 @@ struct StandClearMenuView: View {
             .disabled(model.isRefreshing)
             .accessibilityLabel("Refresh arrivals")
 
+            if let pinnedService = model.pinnedService {
+                Button {
+                    model.clearPin()
+                } label: {
+                    Image(systemName: "pin.slash")
+                }
+                .buttonStyle(.plain)
+                .help("Unpin \(pinnedService.displayName)")
+                .accessibilityLabel("Unpin \(pinnedService.accessibilityName)")
+            }
+
             Button("Quit") { model.quit() }
                 .buttonStyle(.plain)
                 .font(.caption)
@@ -320,6 +331,7 @@ private struct ArrivalListView: View {
 }
 
 private struct ArrivalRow: View {
+    @EnvironmentObject private var model: AppModel
     @State private var showsMinutesAndSeconds = false
 
     let arrival: Arrival
@@ -329,6 +341,13 @@ private struct ArrivalRow: View {
         showsMinutesAndSeconds
             ? arrival.etaMinutesSecondsText(relativeTo: now)
             : arrival.etaText(relativeTo: now)
+    }
+
+    private var isPinned: Bool {
+        model.pinnedService == PinnedService(
+            routeID: arrival.routeID,
+            direction: arrival.direction
+        )
     }
 
     var body: some View {
@@ -357,6 +376,23 @@ private struct ArrivalRow: View {
             Spacer(minLength: 8)
 
             Button {
+                model.togglePin(routeID: arrival.routeID, direction: arrival.direction)
+            } label: {
+                Image(systemName: isPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 30, height: 48)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(isPinned ? Color.white : Color.secondary)
+            .help(isPinned ? "Unpin this service" : "Pin this service to the menu bar")
+            .accessibilityLabel(
+                "\(isPinned ? "Unpin" : "Pin") "
+                    + "\(RouteID.displayLabel(arrival.routeID)) train "
+                    + "\(arrival.direction.accessibilityName)"
+            )
+
+            Button {
                 showsMinutesAndSeconds.toggle()
             } label: {
                 Text(displayedETA)
@@ -378,6 +414,26 @@ private struct ArrivalRow: View {
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)
+    }
+}
+
+private extension PinnedService {
+    var displayName: String {
+        "\(RouteID.displayLabel(routeID)) \(direction.arrow)"
+    }
+
+    var accessibilityName: String {
+        "\(RouteID.displayLabel(routeID)) train \(direction.accessibilityName)"
+    }
+}
+
+private extension TravelDirection {
+    var accessibilityName: String {
+        switch self {
+        case .northbound: "uptown"
+        case .southbound: "downtown"
+        case .unknown: "unknown direction"
+        }
     }
 }
 

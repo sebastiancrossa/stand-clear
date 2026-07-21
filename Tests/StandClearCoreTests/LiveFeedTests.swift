@@ -12,6 +12,7 @@ final class LiveFeedTests: XCTestCase {
 
         XCTAssertGreaterThan(snapshot.arrivals.count, 100)
         XCTAssertEqual(snapshot.failedFeedCount, 0)
+        XCTAssertTrue(snapshot.failedRouteIDs.isEmpty)
         XCTAssertTrue(snapshot.arrivals.contains { $0.routeID == "7" })
         XCTAssertTrue(snapshot.arrivals.allSatisfy { catalog.station(id: $0.stationID) != nil })
     }

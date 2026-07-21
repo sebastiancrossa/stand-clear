@@ -25,7 +25,9 @@ open dist/StandClear.app
 
 On first launch, the app opens directly to the direction-and-line picker with every option unselected. After choosing at least one direction and line, those filters are saved for later launches. The picker includes the complete subway route catalog, rather than only the lines at the nearest station.
 
-The app refreshes live arrival data every 30 seconds. The menu bar label shows the next selected train and its ETA; click it to open the full board or edit the saved filters.
+The app refreshes live arrival data every 30 seconds. By default, the menu bar shows the train icon; click it to open the full board or edit the saved filters.
+
+Use the pin beside an arrival to keep that route and direction in the menu bar as a live minutes-and-seconds countdown, such as `Q ↑ 4:24`. One pin is supported at a time and is remembered across launches. It follows the nearest station, advances to the next matching train at zero, and shows `--:--` when no upcoming arrival is available. Pinning another service replaces the current pin; use the active row pin or the footer’s unpin button to remove it. Removing the pinned route or direction from the filters also clears the pin.
 
 Click an arrival’s ETA to switch that row from floored whole minutes, such as `4 min`, to a minutes-and-seconds countdown, such as `4:24`. Click it again to return to whole minutes.
 

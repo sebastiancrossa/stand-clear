@@ -1,6 +1,16 @@
 import Combine
 @preconcurrency import CoreLocation
 
+extension CLAuthorizationStatus {
+    var allowsStandClearLocation: Bool {
+        switch self {
+        case .authorized, .authorizedAlways: true
+        case .notDetermined, .denied, .restricted: false
+        @unknown default: false
+        }
+    }
+}
+
 @MainActor
 final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var location: CLLocation?
@@ -24,8 +34,10 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         case .authorized, .authorizedAlways:
             manager.requestLocation()
         case .denied, .restricted:
+            location = nil
             locationError = "Location access is off for Stand Clear."
         @unknown default:
+            location = nil
             locationError = "Location access is unavailable."
         }
     }

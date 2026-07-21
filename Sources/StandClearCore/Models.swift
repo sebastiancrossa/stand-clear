@@ -96,11 +96,18 @@ public struct FeedSnapshot: Sendable {
     public let arrivals: [Arrival]
     public let fetchedAt: Date
     public let failedFeedCount: Int
+    public let failedRouteIDs: Set<String>
 
-    public init(arrivals: [Arrival], fetchedAt: Date, failedFeedCount: Int) {
+    public init(
+        arrivals: [Arrival],
+        fetchedAt: Date,
+        failedFeedCount: Int,
+        failedRouteIDs: Set<String> = []
+    ) {
         self.arrivals = arrivals
         self.fetchedAt = fetchedAt
         self.failedFeedCount = failedFeedCount
+        self.failedRouteIDs = failedRouteIDs
     }
 }
 
@@ -167,6 +174,24 @@ public enum RouteID {
 }
 
 public enum ArrivalBoard {
+    public static func nextArrival(
+        from allArrivals: [Arrival],
+        atAny stationIDs: Set<String>,
+        routeID: String,
+        direction: TravelDirection,
+        now: Date = Date()
+    ) -> Arrival? {
+        let normalizedRouteID = RouteID.normalized(routeID)
+        return allArrivals
+            .filter {
+                stationIDs.contains($0.stationID)
+                    && $0.routeID == normalizedRouteID
+                    && $0.direction == direction
+                    && $0.arrivalTime > now
+            }
+            .min { $0.arrivalTime < $1.arrivalTime }
+    }
+
     public static func arrivals(
         from allArrivals: [Arrival],
         at stationID: String,
