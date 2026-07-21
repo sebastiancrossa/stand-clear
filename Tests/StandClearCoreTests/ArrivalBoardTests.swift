@@ -151,6 +151,138 @@ final class ArrivalBoardTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["q", "seven"])
     }
 
+    func testNextArrivalSelectsEarliestFutureTrainForPinnedService() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrivals = [
+            makeArrival(
+                id: "later-q",
+                route: "Q",
+                station: "R16",
+                direction: .northbound,
+                time: now.addingTimeInterval(300)
+            ),
+            makeArrival(
+                id: "downtown-q",
+                route: "Q",
+                station: "R16",
+                direction: .southbound,
+                time: now.addingTimeInterval(60)
+            ),
+            makeArrival(
+                id: "other-route",
+                route: "N",
+                station: "R16",
+                direction: .northbound,
+                time: now.addingTimeInterval(30)
+            ),
+            makeArrival(
+                id: "other-station",
+                route: "Q",
+                station: "R17",
+                direction: .northbound,
+                time: now.addingTimeInterval(45)
+            ),
+            makeArrival(
+                id: "next-q",
+                route: "Q",
+                station: "R16",
+                direction: .northbound,
+                time: now.addingTimeInterval(120)
+            ),
+        ]
+
+        let result = ArrivalBoard.nextArrival(
+            from: arrivals,
+            atAny: ["R16"],
+            routeID: "q",
+            direction: .northbound,
+            now: now
+        )
+
+        XCTAssertEqual(result?.id, "next-q")
+    }
+
+    func testNextArrivalAdvancesPastTrainAtCurrentTime() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrivals = [
+            makeArrival(id: "arriving-q", route: "Q", station: "R16", time: now),
+            makeArrival(
+                id: "following-q",
+                route: "Q",
+                station: "R16",
+                time: now.addingTimeInterval(240)
+            ),
+        ]
+
+        let result = ArrivalBoard.nextArrival(
+            from: arrivals,
+            atAny: ["R16"],
+            routeID: "Q",
+            direction: .northbound,
+            now: now
+        )
+
+        XCTAssertEqual(result?.id, "following-q")
+    }
+
+    func testNextArrivalSearchesEveryStationInComplex() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrival = makeArrival(
+            id: "seven",
+            route: "7",
+            station: "725",
+            time: now.addingTimeInterval(90)
+        )
+
+        let result = ArrivalBoard.nextArrival(
+            from: [arrival],
+            atAny: ["R16", "725"],
+            routeID: "7",
+            direction: .northbound,
+            now: now
+        )
+
+        XCTAssertEqual(result?.id, "seven")
+    }
+
+    func testNextArrivalPreservesExpressRouteIdentity() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrivals = [
+            makeArrival(id: "local", route: "7", station: "701", time: now.addingTimeInterval(60)),
+            makeArrival(id: "express", route: "7X", station: "701", time: now.addingTimeInterval(90)),
+        ]
+
+        let result = ArrivalBoard.nextArrival(
+            from: arrivals,
+            atAny: ["701"],
+            routeID: "7x",
+            direction: .northbound,
+            now: now
+        )
+
+        XCTAssertEqual(result?.id, "express")
+    }
+
+    func testNextArrivalReturnsNilWithoutFutureMatch() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrival = makeArrival(
+            id: "past-q",
+            route: "Q",
+            station: "R16",
+            time: now.addingTimeInterval(-1)
+        )
+
+        let result = ArrivalBoard.nextArrival(
+            from: [arrival],
+            atAny: ["R16"],
+            routeID: "Q",
+            direction: .northbound,
+            now: now
+        )
+
+        XCTAssertNil(result)
+    }
+
     private func makeArrival(
         id: String,
         route: String,

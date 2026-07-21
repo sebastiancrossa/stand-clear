@@ -27,5 +27,10 @@ let package = Package(
             dependencies: ["StandClearCore"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "StandClearTests",
+            dependencies: ["StandClear"],
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

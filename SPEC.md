@@ -13,6 +13,12 @@ Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a
 - Require at least one direction and one line before showing arrivals.
 - Let the user choose northbound and/or southbound service and remember that choice.
 - Let the user choose from the complete subway route catalog and remember which lines appear.
+- Let the user pin one route-and-direction pair from an arrival row and remember it across launches.
+- Show the pinned route, direction arrow, and next arrival as a `minutes:seconds` countdown directly in the menu bar.
+- Follow the nearest station, advance immediately to the next matching train at zero, and show `--:--` when no upcoming matching arrival is available.
+- Keep counting cached future arrivals when an MTA feed is temporarily unavailable.
+- Let the user replace a pin from another arrival row or remove it from the active row or footer.
+- Clear the pin when its route or direction is removed from the saved filters.
 - Refresh automatically and expose a manual refresh action.
 - Remain a menu-bar-only app with no Dock icon.
 
@@ -26,4 +32,4 @@ Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a
 
 ## Out of scope for the MVP
 
-- Trip planning, maps, buses, PATH, service alerts, push notifications, and App Store distribution.
+- Trip planning, maps, buses, PATH, service alerts, push notifications, multiple pins, station-specific pins, and App Store distribution.

@@ -24,6 +24,17 @@ public struct MTAClient {
         "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si",
     ].compactMap(URL.init(string:))
 
+    private static let routeIDsByFeedIndex: [Set<String>] = [
+        ["1", "2", "3", "4", "5", "5X", "6", "6X", "7", "7X", "GS"],
+        ["A", "C", "E", "H"],
+        ["B", "D", "F", "FX", "M", "FS"],
+        ["G"],
+        ["J", "Z"],
+        ["L"],
+        ["N", "Q", "R", "W"],
+        ["SI"],
+    ]
+
     private let session: URLSession
 
     public init(session: URLSession = .shared) {
@@ -35,8 +46,8 @@ public struct MTAClient {
         now: Date = Date()
     ) async throws -> FeedSnapshot {
         let session = session
-        let results = await withTaskGroup(of: Result<[RealtimeTrip], Error>.self) { group in
-            for url in Self.feedURLs {
+        let results = await withTaskGroup(of: (index: Int, trips: [RealtimeTrip]?).self) { group in
+            for (index, url) in Self.feedURLs.enumerated() {
                 group.addTask {
                     do {
                         var request = URLRequest(url: url)
@@ -46,23 +57,28 @@ public struct MTAClient {
                         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                             throw MTAFeedError.invalidResponse
                         }
-                        return .success(try GTFSRealtimeParser.parse(data: data))
+                        return (index, try GTFSRealtimeParser.parse(data: data))
                     } catch {
-                        return .failure(error)
+                        return (index, nil)
                     }
                 }
             }
 
-            var collected: [Result<[RealtimeTrip], Error>] = []
+            var collected: [(index: Int, trips: [RealtimeTrip]?)] = []
             for await result in group {
                 collected.append(result)
             }
             return collected
         }
 
-        let successfulTrips = results.compactMap { try? $0.get() }
+        let successfulTrips = results.compactMap(\.trips)
         guard !successfulTrips.isEmpty else {
             throw MTAFeedError.allFeedsFailed
+        }
+        let failedFeedIndices = results.compactMap { $0.trips == nil ? $0.index : nil }
+        let failedRouteIDs = failedFeedIndices.reduce(into: Set<String>()) { result, index in
+            guard Self.routeIDsByFeedIndex.indices.contains(index) else { return }
+            result.formUnion(Self.routeIDsByFeedIndex[index])
         }
 
         let horizon = now.addingTimeInterval(2 * 60 * 60)
@@ -107,7 +123,8 @@ public struct MTAClient {
         return FeedSnapshot(
             arrivals: uniqueArrivals.values.sorted { $0.arrivalTime < $1.arrivalTime },
             fetchedAt: now,
-            failedFeedCount: results.count - successfulTrips.count
+            failedFeedCount: failedFeedIndices.count,
+            failedRouteIDs: failedRouteIDs
         )
     }
 }
