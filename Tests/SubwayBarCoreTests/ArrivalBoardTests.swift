@@ -35,6 +35,21 @@ final class ArrivalBoardTests: XCTestCase {
         )
     }
 
+    func testNoSelectedDirectionsProducesAnEmptyBoard() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrival = makeArrival(id: "q", route: "Q", station: "R16", time: now.addingTimeInterval(60))
+
+        XCTAssertTrue(
+            ArrivalBoard.arrivals(
+                from: [arrival],
+                at: "R16",
+                selectedRoutes: ["Q"],
+                selectedDirections: [],
+                now: now
+            ).isEmpty
+        )
+    }
+
     func testBoardFiltersBySelectedDirection() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let arrivals = [

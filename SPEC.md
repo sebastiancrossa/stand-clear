@@ -8,6 +8,8 @@ SubwayBar is a macOS menu bar app for checking nearby NYC subway arrivals at a g
 - Keep location processing on device.
 - Fetch live arrivals from the MTA public GTFS-Realtime subway feeds.
 - Show the nearest station, distance, route, direction, destination, and ETA.
+- Open the direction-and-line picker first during onboarding, with every option unselected.
+- Require at least one direction and one line before showing arrivals.
 - Let the user choose northbound and/or southbound service and remember that choice.
 - Let the user choose from the complete subway route catalog and remember which lines appear.
 - Refresh automatically and expose a manual refresh action.

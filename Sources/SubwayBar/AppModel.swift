@@ -27,24 +27,36 @@ final class AppModel: ObservableObject {
     private var cancellables: Set<AnyCancellable> = []
     private var hasStarted = false
     private var lastRefreshAttempt: Date?
-    private var userEditedSelection = false
 
     private enum DefaultsKey {
         static let selectedRoutes = "selectedRoutes"
         static let selectedDirections = "selectedDirections"
         static let hasConfiguredLines = "hasConfiguredLines"
+        static let selectionOnboardingVersion = "selectionOnboardingVersion"
     }
+
+    private static let currentSelectionOnboardingVersion = 1
 
     init(client: MTAClient = MTAClient(), defaults: UserDefaults = .standard) {
         self.client = client
         self.defaults = defaults
-        selectedRoutes = Set(defaults.stringArray(forKey: DefaultsKey.selectedRoutes) ?? [])
-        if let storedDirections = defaults.stringArray(forKey: DefaultsKey.selectedDirections) {
-            selectedDirections = Set(storedDirections.compactMap(TravelDirection.init(rawValue:)))
+        let needsSelectionOnboarding = defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
+            < Self.currentSelectionOnboardingVersion
+
+        if needsSelectionOnboarding {
+            selectedRoutes = []
+            selectedDirections = []
+            defaults.set([], forKey: DefaultsKey.selectedRoutes)
+            defaults.set([], forKey: DefaultsKey.selectedDirections)
         } else {
-            selectedDirections = Set(TravelDirection.selectableCases)
+            selectedRoutes = Set(defaults.stringArray(forKey: DefaultsKey.selectedRoutes) ?? [])
+            if let storedDirections = defaults.stringArray(forKey: DefaultsKey.selectedDirections) {
+                selectedDirections = Set(storedDirections.compactMap(TravelDirection.init(rawValue:)))
+            } else {
+                selectedDirections = []
+            }
         }
-        isChoosingLines = !defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
+        isChoosingLines = needsSelectionOnboarding || !defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
 
         do {
             catalog = try StationCatalog.bundled()
@@ -52,6 +64,7 @@ final class AppModel: ObservableObject {
             catalog = nil
             startupError = error.localizedDescription
         }
+        availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
 
         locationService.$location
             .compactMap { $0 }
@@ -88,6 +101,12 @@ final class AppModel: ObservableObject {
         return "\(RouteID.displayLabel(arrival.routeID)) \(arrival.etaText(relativeTo: now))"
     }
 
+    var hasConfiguredSelection: Bool {
+        defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
+            && defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
+                >= Self.currentSelectionOnboardingVersion
+    }
+
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
@@ -117,7 +136,6 @@ final class AppModel: ObservableObject {
 
     func toggleRoute(_ routeID: String) {
         let routeID = RouteID.normalized(routeID)
-        userEditedSelection = true
         if selectedRoutes.contains(routeID) {
             selectedRoutes.remove(routeID)
         } else {
@@ -141,6 +159,10 @@ final class AppModel: ObservableObject {
             !selectedDirections.isEmpty
         else { return }
         defaults.set(true, forKey: DefaultsKey.hasConfiguredLines)
+        defaults.set(
+            Self.currentSelectionOnboardingVersion,
+            forKey: DefaultsKey.selectionOnboardingVersion
+        )
         isChoosingLines = false
     }
 
@@ -163,16 +185,7 @@ final class AppModel: ObservableObject {
     }
 
     private func updateAvailableRoutes() {
-        guard nearestStation != nil else {
-            availableRoutes = []
-            return
-        }
         availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
-
-        if !defaults.bool(forKey: DefaultsKey.hasConfiguredLines), !userEditedSelection {
-            selectedRoutes = Set(availableRoutes)
-            persistSelection()
-        }
     }
 
     private func persistSelection() {

@@ -42,7 +42,7 @@ struct SubwayMenuView: View {
 
             Spacer(minLength: 8)
 
-            if model.nearestStation != nil {
+            if model.nearestStation != nil, model.hasConfiguredSelection {
                 Button {
                     model.isChoosingLines.toggle()
                 } label: {
@@ -70,28 +70,30 @@ struct SubwayMenuView: View {
                 action: nil
             )
         } else {
-            switch model.locationService.authorizationStatus {
-            case .denied, .restricted:
-                StatusView(
-                    symbol: "location.slash.fill",
-                    title: "Location is off",
-                    message: "Allow location access so SubwayBar can find the station closest to you. Your coordinates stay on this Mac.",
-                    actionTitle: "Open Location Settings",
-                    action: model.openLocationSettings
-                )
-            default:
-                if model.nearestStation == nil {
+            if model.isChoosingLines {
+                RoutePickerView()
+            } else {
+                switch model.locationService.authorizationStatus {
+                case .denied, .restricted:
                     StatusView(
-                        symbol: "location.fill",
-                        title: "Finding your station",
-                        message: "SubwayBar is waiting for a location fix and loading the latest MTA arrivals.",
-                        actionTitle: "Try Again",
-                        action: model.locationService.requestLocation
+                        symbol: "location.slash.fill",
+                        title: "Location is off",
+                        message: "Allow location access so SubwayBar can find the station closest to you. Your coordinates stay on this Mac.",
+                        actionTitle: "Open Location Settings",
+                        action: model.openLocationSettings
                     )
-                } else if model.isChoosingLines {
-                    RoutePickerView()
-                } else {
-                    ArrivalListView()
+                default:
+                    if model.nearestStation == nil {
+                        StatusView(
+                            symbol: "location.fill",
+                            title: "Finding your station",
+                            message: "SubwayBar is waiting for a location fix and loading the latest MTA arrivals.",
+                            actionTitle: "Try Again",
+                            action: model.locationService.requestLocation
+                        )
+                    } else {
+                        ArrivalListView()
+                    }
                 }
             }
         }
@@ -227,6 +229,7 @@ private struct RoutePickerView: View {
                 .buttonStyle(.plain)
                 .disabled(!canShowArrivals)
                 .opacity(canShowArrivals ? 1 : 0.35)
+                .accessibilityHint("Select at least one direction and one line to continue.")
             }
             .padding(24)
         }
