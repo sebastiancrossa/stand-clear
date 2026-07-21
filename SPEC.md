@@ -8,7 +8,7 @@ Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a
 - Keep location processing on device.
 - Fetch live arrivals from the MTA public GTFS-Realtime subway feeds.
 - Show the nearest station, distance, route, direction, destination, and ETA.
-- Toggle each arrival independently between floored whole minutes and a `minutes:seconds` countdown.
+- Toggle all arrivals together between floored whole minutes and a `minutes:seconds` countdown.
 - Open the direction-and-line picker first during onboarding, with every option unselected.
 - Require at least one direction and one line before showing arrivals.
 - Let the user choose northbound and/or southbound service and remember that choice.

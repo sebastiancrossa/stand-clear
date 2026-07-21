@@ -103,6 +103,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedRoutes: Set<String>
     @Published private(set) var selectedDirections: Set<TravelDirection>
     @Published private(set) var pinnedService: PinnedService?
+    @Published private(set) var showsMinutesAndSeconds = false
 
     let locationService = LocationService()
 
@@ -279,6 +280,10 @@ final class AppModel: ObservableObject {
     func clearPin() {
         pinnedService = nil
         persistPin()
+    }
+
+    func toggleArrivalTimeDisplay() {
+        showsMinutesAndSeconds.toggle()
     }
 
     func finishChoosingLines() {

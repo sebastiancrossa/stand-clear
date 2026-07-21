@@ -29,7 +29,7 @@ The app refreshes live arrival data every 30 seconds. By default, the menu bar s
 
 Use the pin beside an arrival to keep that route and direction in the menu bar as a live minutes-and-seconds countdown, such as `Q ↑ 4:24`. One pin is supported at a time and is remembered across launches. It follows the nearest station, advances to the next matching train at zero, and shows `--:--` when no upcoming arrival is available. Pinning another service replaces the current pin; use the active row pin or the footer’s unpin button to remove it. Removing the pinned route or direction from the filters also clears the pin.
 
-Click an arrival’s ETA to switch that row from floored whole minutes, such as `4 min`, to a minutes-and-seconds countdown, such as `4:24`. Click it again to return to whole minutes.
+Click any arrival’s ETA to switch every row from floored whole minutes, such as `4 min`, to a minutes-and-seconds countdown, such as `4:24`. Click any ETA again to return every row to whole minutes.
 
 To update the bundled station coordinates from the latest regular MTA static feed:
 

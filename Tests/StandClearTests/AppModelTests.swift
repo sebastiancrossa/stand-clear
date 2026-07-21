@@ -5,6 +5,18 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testTogglingArrivalTimeDisplayChangesTheSharedBoardMode() {
+        let model = AppModel(defaults: makeDefaults())
+
+        XCTAssertFalse(model.showsMinutesAndSeconds)
+
+        model.toggleArrivalTimeDisplay()
+        XCTAssertTrue(model.showsMinutesAndSeconds)
+
+        model.toggleArrivalTimeDisplay()
+        XCTAssertFalse(model.showsMinutesAndSeconds)
+    }
+
     func testTogglingPinCreatesAndPersistsPinnedService() {
         let defaults = makeDefaults()
         defaults.set(["Q"], forKey: "selectedRoutes")

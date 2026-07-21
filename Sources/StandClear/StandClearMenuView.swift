@@ -332,13 +332,12 @@ private struct ArrivalListView: View {
 
 private struct ArrivalRow: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showsMinutesAndSeconds = false
 
     let arrival: Arrival
     let now: Date
 
     private var displayedETA: String {
-        showsMinutesAndSeconds
+        model.showsMinutesAndSeconds
             ? arrival.etaMinutesSecondsText(relativeTo: now)
             : arrival.etaText(relativeTo: now)
     }
@@ -393,7 +392,7 @@ private struct ArrivalRow: View {
             )
 
             Button {
-                showsMinutesAndSeconds.toggle()
+                model.toggleArrivalTimeDisplay()
             } label: {
                 Text(displayedETA)
                     .font(.system(size: 24, weight: .regular, design: .rounded))
@@ -403,13 +402,13 @@ private struct ArrivalRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(showsMinutesAndSeconds ? "Show whole minutes" : "Show minutes and seconds")
+            .help(model.showsMinutesAndSeconds ? "Show whole minutes" : "Show minutes and seconds")
             .accessibilityLabel("Arrival time")
             .accessibilityValue(displayedETA)
             .accessibilityHint(
-                showsMinutesAndSeconds
-                    ? "Click to show the arrival time in whole minutes."
-                    : "Click to show the arrival time in minutes and seconds."
+                model.showsMinutesAndSeconds
+                    ? "Click to show all arrival times in whole minutes."
+                    : "Click to show all arrival times in minutes and seconds."
             )
         }
         .padding(.horizontal, 18)
