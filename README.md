@@ -23,7 +23,7 @@ make app
 open dist/SubwayBar.app
 ```
 
-The app refreshes live arrival data every 30 seconds. The menu bar label shows the next selected train and its ETA; click it to open the full board or change line filters.
+The app refreshes live arrival data every 30 seconds. The menu bar label shows the next selected train and its ETA; click it to open the full board or change the saved direction and line filters. The picker includes the complete subway route catalog, rather than only the lines at the nearest station.
 
 To update the bundled station coordinates from the latest regular MTA static feed:
 

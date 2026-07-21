@@ -35,6 +35,36 @@ final class ArrivalBoardTests: XCTestCase {
         )
     }
 
+    func testBoardFiltersBySelectedDirection() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let arrivals = [
+            makeArrival(
+                id: "uptown-q",
+                route: "Q",
+                station: "R16",
+                direction: .northbound,
+                time: now.addingTimeInterval(60)
+            ),
+            makeArrival(
+                id: "downtown-q",
+                route: "Q",
+                station: "R16",
+                direction: .southbound,
+                time: now.addingTimeInterval(90)
+            ),
+        ]
+
+        let result = ArrivalBoard.arrivals(
+            from: arrivals,
+            at: "R16",
+            selectedRoutes: ["Q"],
+            selectedDirections: [.southbound],
+            now: now
+        )
+
+        XCTAssertEqual(result.map(\.id), ["downtown-q"])
+    }
+
     func testExpressAndShuttleRouteIDsKeepTheirIdentity() {
         XCTAssertEqual(RouteID.normalized("6x"), "6X")
         XCTAssertEqual(RouteID.displayLabel("6X"), "6")
@@ -42,6 +72,30 @@ final class ArrivalBoardTests: XCTestCase {
         XCTAssertEqual(RouteID.displayLabel("H"), "SR")
         XCTAssertEqual(RouteID.displayLabel("FS"), "SF")
         XCTAssertEqual(RouteID.displayLabel("GS"), "S")
+    }
+
+    func testRoutesAreGroupedInSubwayMapOrder() {
+        let routes = [
+            "A", "C", "E", "B", "D", "F", "M", "G", "L", "J", "Z",
+            "N", "Q", "R", "W", "1", "2", "3", "4", "5", "6", "6X",
+            "7", "7X", "H", "FS", "GS",
+        ]
+
+        XCTAssertEqual(
+            RouteID.grouped(routes),
+            [
+                ["A", "C", "E"],
+                ["B", "D", "F", "M"],
+                ["G"],
+                ["L"],
+                ["J", "Z"],
+                ["N", "Q", "R", "W"],
+                ["1", "2", "3"],
+                ["4", "5", "6", "6X"],
+                ["7", "7X"],
+                ["H", "FS", "GS"],
+            ]
+        )
     }
 
     func testBoardCanIncludeAllPlatformsInAStationComplex() {
@@ -61,13 +115,19 @@ final class ArrivalBoardTests: XCTestCase {
         XCTAssertEqual(result.map(\.id), ["q", "seven"])
     }
 
-    private func makeArrival(id: String, route: String, station: String, time: Date) -> Arrival {
+    private func makeArrival(
+        id: String,
+        route: String,
+        station: String,
+        direction: TravelDirection = .northbound,
+        time: Date
+    ) -> Arrival {
         Arrival(
             id: id,
             routeID: route,
             stationID: station,
             stopID: "\(station)N",
-            direction: .northbound,
+            direction: direction,
             destination: "Test Terminal",
             arrivalTime: time
         )

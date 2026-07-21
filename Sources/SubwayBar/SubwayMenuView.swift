@@ -52,7 +52,7 @@ struct SubwayMenuView: View {
                         .background(Color.white.opacity(0.1), in: Circle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(model.isChoosingLines ? "Close line picker" : "Choose lines")
+                .accessibilityLabel(model.isChoosingLines ? "Close filters" : "Choose directions and lines")
             }
         }
         .padding(.horizontal, 18)
@@ -148,47 +148,66 @@ struct SubwayMenuView: View {
 private struct RoutePickerView: View {
     @EnvironmentObject private var model: AppModel
 
-    private let columns = Array(repeating: GridItem(.fixed(58), spacing: 14), count: 4)
+    private var canShowArrivals: Bool {
+        !model.selectedRoutes.intersection(model.availableRoutes).isEmpty
+            && !model.selectedDirections.isEmpty
+    }
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
+            VStack(spacing: 20) {
                 VStack(spacing: 8) {
-                    Image(systemName: "arrow.up.and.down")
-                        .font(.system(size: 28, weight: .light))
-                        .foregroundStyle(.secondary)
-                    Text("CHOOSE YOUR LINES")
-                        .font(.system(size: 18, weight: .bold, design: .rounded))
-                    Text("Only selected lines appear on your arrival board.")
+                    Text("CHOOSE DIRECTION & LINES")
+                        .font(.system(size: 18, weight: .semibold, design: .rounded))
+                    Text("Only selected directions and lines appear on your arrival board.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                HStack(spacing: 12) {
+                    ForEach(TravelDirection.selectableCases, id: \.self) { direction in
+                        DirectionButton(
+                            direction: direction,
+                            isSelected: model.selectedDirections.contains(direction)
+                        ) {
+                            model.toggleDirection(direction)
+                        }
+                    }
                 }
 
                 if model.availableRoutes.isEmpty {
                     VStack(spacing: 12) {
                         ProgressView().tint(.white)
-                        Text("Checking this station’s lines…")
+                        Text("Loading subway lines…")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 48)
                 } else {
-                    LazyVGrid(columns: columns, spacing: 16) {
-                        ForEach(model.availableRoutes, id: \.self) { routeID in
-                            Button {
-                                model.toggleRoute(routeID)
-                            } label: {
-                                RouteBullet(
-                                    routeID: routeID,
-                                    size: 54,
-                                    isSelected: model.selectedRoutes.contains(routeID)
-                                )
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(RouteID.grouped(model.availableRoutes).enumerated()), id: \.offset) { _, routes in
+                            HStack(spacing: 14) {
+                                ForEach(routes, id: \.self) { routeID in
+                                    Button {
+                                        model.toggleRoute(routeID)
+                                    } label: {
+                                        RouteBullet(
+                                            routeID: routeID,
+                                            size: 54,
+                                            isSelected: model.selectedRoutes.contains(routeID)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("\(RouteID.displayLabel(routeID)) train")
+                                    .accessibilityValue(model.selectedRoutes.contains(routeID) ? "Selected" : "Not selected")
+                                }
+
+                                Spacer(minLength: 0)
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("\(routeID) train")
-                            .accessibilityValue(model.selectedRoutes.contains(routeID) ? "Selected" : "Not selected")
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 Button {
@@ -206,11 +225,41 @@ private struct RoutePickerView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(model.selectedRoutes.intersection(model.availableRoutes).isEmpty)
-                .opacity(model.selectedRoutes.intersection(model.availableRoutes).isEmpty ? 0.35 : 1)
+                .disabled(!canShowArrivals)
+                .opacity(canShowArrivals ? 1 : 0.35)
             }
             .padding(24)
         }
+    }
+}
+
+private struct DirectionButton: View {
+    let direction: TravelDirection
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: direction == .northbound ? "arrow.up" : "arrow.down")
+                    .font(.system(size: 26, weight: .light))
+                Text(direction.pickerTitle)
+                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 76)
+            .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.5))
+            .background(Color.white.opacity(isSelected ? 0.12 : 0.04))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.white.opacity(isSelected ? 0.28 : 0.1), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(direction.pickerTitle.capitalized)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 }
 
@@ -235,10 +284,10 @@ private struct ArrivalListView: View {
                             .foregroundStyle(.secondary)
                         Text("No selected trains right now")
                             .font(.headline)
-                        Text("Try another line or refresh the MTA feed.")
+                        Text("Try another direction or line, or refresh the MTA feed.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                        Button("Choose Lines") { model.isChoosingLines = true }
+                        Button("Choose Direction & Lines") { model.isChoosingLines = true }
                             .buttonStyle(.borderedProminent)
                             .tint(.white)
                             .foregroundStyle(.black)

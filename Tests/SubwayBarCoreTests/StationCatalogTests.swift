@@ -32,11 +32,17 @@ final class StationCatalogTests: XCTestCase {
 
     func testBundledCatalogContainsTheFullSubwayNetwork() throws {
         let catalog = try StationCatalog.bundled()
+        let expectedRoutes: Set<String> = [
+            "A", "C", "E", "B", "D", "F", "M", "G", "L", "J",
+            "N", "Q", "R", "W", "1", "2", "3", "4", "5", "6", "6X",
+            "7", "7X", "H", "FS", "GS",
+        ]
 
         XCTAssertGreaterThan(catalog.stations.count, 450)
         XCTAssertNotNil(catalog.station(id: "127"))
         XCTAssertTrue(catalog.relatedStations(to: "R16").contains("127"))
         XCTAssertTrue(catalog.relatedStations(to: "R16").contains("A27"))
         XCTAssertTrue(catalog.routes(serving: "R16").isSuperset(of: ["1", "2", "3", "7", "A", "C", "E", "N", "Q", "R", "W"]))
+        XCTAssertTrue(catalog.allRoutes.isSuperset(of: expectedRoutes))
     }
 }

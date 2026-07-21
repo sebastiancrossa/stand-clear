@@ -17,6 +17,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var startupError: String?
     @Published var isChoosingLines: Bool
     @Published private(set) var selectedRoutes: Set<String>
+    @Published private(set) var selectedDirections: Set<TravelDirection>
 
     let locationService = LocationService()
 
@@ -30,6 +31,7 @@ final class AppModel: ObservableObject {
 
     private enum DefaultsKey {
         static let selectedRoutes = "selectedRoutes"
+        static let selectedDirections = "selectedDirections"
         static let hasConfiguredLines = "hasConfiguredLines"
     }
 
@@ -37,6 +39,11 @@ final class AppModel: ObservableObject {
         self.client = client
         self.defaults = defaults
         selectedRoutes = Set(defaults.stringArray(forKey: DefaultsKey.selectedRoutes) ?? [])
+        if let storedDirections = defaults.stringArray(forKey: DefaultsKey.selectedDirections) {
+            selectedDirections = Set(storedDirections.compactMap(TravelDirection.init(rawValue:)))
+        } else {
+            selectedDirections = Set(TravelDirection.selectableCases)
+        }
         isChoosingLines = !defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
 
         do {
@@ -71,6 +78,7 @@ final class AppModel: ObservableObject {
             from: allArrivals,
             atAny: catalog.relatedStations(to: station.id),
             selectedRoutes: selectedRoutes,
+            selectedDirections: selectedDirections,
             now: now
         )
     }
@@ -118,8 +126,20 @@ final class AppModel: ObservableObject {
         persistSelection()
     }
 
+    func toggleDirection(_ direction: TravelDirection) {
+        if selectedDirections.contains(direction) {
+            selectedDirections.remove(direction)
+        } else {
+            selectedDirections.insert(direction)
+        }
+        persistDirections()
+    }
+
     func finishChoosingLines() {
-        guard !selectedRoutes.intersection(availableRoutes).isEmpty else { return }
+        guard
+            !selectedRoutes.intersection(availableRoutes).isEmpty,
+            !selectedDirections.isEmpty
+        else { return }
         defaults.set(true, forKey: DefaultsKey.hasConfiguredLines)
         isChoosingLines = false
     }
@@ -143,11 +163,11 @@ final class AppModel: ObservableObject {
     }
 
     private func updateAvailableRoutes() {
-        guard let station = nearestStation else {
+        guard nearestStation != nil else {
             availableRoutes = []
             return
         }
-        availableRoutes = RouteID.sorted(catalog?.routes(serving: station.id) ?? [])
+        availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
 
         if !defaults.bool(forKey: DefaultsKey.hasConfiguredLines), !userEditedSelection {
             selectedRoutes = Set(availableRoutes)
@@ -157,5 +177,14 @@ final class AppModel: ObservableObject {
 
     private func persistSelection() {
         defaults.set(RouteID.sorted(selectedRoutes), forKey: DefaultsKey.selectedRoutes)
+    }
+
+    private func persistDirections() {
+        defaults.set(
+            TravelDirection.selectableCases
+                .filter(selectedDirections.contains)
+                .map(\.rawValue),
+            forKey: DefaultsKey.selectedDirections
+        )
     }
 }

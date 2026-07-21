@@ -24,6 +24,8 @@ public enum TravelDirection: String, CaseIterable, Hashable, Sendable {
     case southbound
     case unknown
 
+    public static let selectableCases: [TravelDirection] = [.northbound, .southbound]
+
     public var arrow: String {
         switch self {
         case .northbound: "↑"
@@ -37,6 +39,14 @@ public enum TravelDirection: String, CaseIterable, Hashable, Sendable {
         case .northbound: "UPTOWN / NORTHBOUND"
         case .southbound: "DOWNTOWN / SOUTHBOUND"
         case .unknown: "OTHER TRAINS"
+        }
+    }
+
+    public var pickerTitle: String {
+        switch self {
+        case .northbound: "UPTOWN / NORTHBOUND"
+        case .southbound: "DOWNTOWN / SOUTHBOUND"
+        case .unknown: "OTHER"
         }
     }
 }
@@ -93,11 +103,21 @@ public struct FeedSnapshot: Sendable {
 }
 
 public enum RouteID {
-    public static let displayOrder = [
-        "A", "C", "E", "B", "D", "F", "M", "G", "L", "J", "Z",
-        "N", "Q", "R", "W", "1", "2", "3", "4", "5", "5X", "6", "6X",
-        "7", "7X", "FX", "H", "FS", "GS", "SI",
+    public static let displayGroups = [
+        ["A", "C", "E"],
+        ["B", "D", "F", "FX", "M"],
+        ["G"],
+        ["L"],
+        ["J", "Z"],
+        ["N", "Q", "R", "W"],
+        ["1", "2", "3"],
+        ["4", "5", "5X", "6", "6X"],
+        ["7", "7X"],
+        ["H", "FS", "GS"],
+        ["SI"],
     ]
+
+    public static let displayOrder = displayGroups.flatMap { $0 }
 
     public static func normalized(_ routeID: String) -> String {
         routeID.uppercased()
@@ -129,6 +149,19 @@ public enum RouteID {
             return lhs == rhs ? $0 < $1 : lhs < rhs
         }
     }
+
+    public static func grouped(_ routeIDs: some Sequence<String>) -> [[String]] {
+        let routeSet = Set(routeIDs.map(normalized))
+        let knownRoutes = Set(displayOrder)
+        var groups = displayGroups
+            .map { group in group.filter(routeSet.contains) }
+            .filter { !$0.isEmpty }
+        let ungrouped = routeSet.subtracting(knownRoutes).sorted()
+        if !ungrouped.isEmpty {
+            groups.append(ungrouped)
+        }
+        return groups
+    }
 }
 
 public enum ArrivalBoard {
@@ -136,6 +169,7 @@ public enum ArrivalBoard {
         from allArrivals: [Arrival],
         at stationID: String,
         selectedRoutes: Set<String>,
+        selectedDirections: Set<TravelDirection> = Set(TravelDirection.selectableCases),
         now: Date = Date(),
         limit: Int = 16
     ) -> [Arrival] {
@@ -143,6 +177,7 @@ public enum ArrivalBoard {
             from: allArrivals,
             atAny: [stationID],
             selectedRoutes: selectedRoutes,
+            selectedDirections: selectedDirections,
             now: now,
             limit: limit
         )
@@ -152,6 +187,7 @@ public enum ArrivalBoard {
         from allArrivals: [Arrival],
         atAny stationIDs: Set<String>,
         selectedRoutes: Set<String>,
+        selectedDirections: Set<TravelDirection> = Set(TravelDirection.selectableCases),
         now: Date = Date(),
         limit: Int = 16
     ) -> [Arrival] {
@@ -162,6 +198,7 @@ public enum ArrivalBoard {
                     stationIDs.contains($0.stationID)
                         && $0.arrivalTime >= now.addingTimeInterval(-30)
                         && normalizedSelection.contains($0.routeID)
+                        && selectedDirections.contains($0.direction)
                 }
                 .sorted { $0.arrivalTime < $1.arrivalTime }
                 .prefix(limit)

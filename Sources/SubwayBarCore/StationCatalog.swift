@@ -193,6 +193,12 @@ public struct StationCatalog: Sendable {
         }
     }
 
+    public var allRoutes: Set<String> {
+        routesByStationID.values.reduce(into: Set<String>()) { routes, stationRoutes in
+            routes.formUnion(stationRoutes)
+        }
+    }
+
     public func nearest(to location: CLLocation) -> (station: Station, distance: CLLocationDistance)? {
         stations.lazy
             .map { station in (station, station.location.distance(from: location)) }
