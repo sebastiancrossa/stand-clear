@@ -79,19 +79,16 @@ public struct Arrival: Identifiable, Hashable, Sendable {
     }
 
     public func etaText(relativeTo now: Date = Date()) -> String {
-        let seconds = max(0, arrivalTime.timeIntervalSince(now))
-        if seconds < 15 {
-            return "Due"
-        }
-        if seconds < 90 {
-            return "\(Int(seconds.rounded())) sec"
-        }
-        return "\(Int(ceil(seconds / 60))) min"
+        "\(remainingWholeSeconds(relativeTo: now) / 60) min"
     }
 
-    public func exactETASecondsText(relativeTo now: Date = Date()) -> String {
-        let seconds = max(0, Int(ceil(arrivalTime.timeIntervalSince(now))))
-        return "\(seconds) sec"
+    public func etaMinutesSecondsText(relativeTo now: Date = Date()) -> String {
+        let seconds = remainingWholeSeconds(relativeTo: now)
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private func remainingWholeSeconds(relativeTo now: Date) -> Int {
+        max(0, Int(floor(arrivalTime.timeIntervalSince(now))))
     }
 }
 

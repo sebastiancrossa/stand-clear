@@ -320,14 +320,14 @@ private struct ArrivalListView: View {
 }
 
 private struct ArrivalRow: View {
-    @State private var showsExactSeconds = false
+    @State private var showsMinutesAndSeconds = false
 
     let arrival: Arrival
     let now: Date
 
     private var displayedETA: String {
-        showsExactSeconds
-            ? arrival.exactETASecondsText(relativeTo: now)
+        showsMinutesAndSeconds
+            ? arrival.etaMinutesSecondsText(relativeTo: now)
             : arrival.etaText(relativeTo: now)
     }
 
@@ -357,7 +357,7 @@ private struct ArrivalRow: View {
             Spacer(minLength: 8)
 
             Button {
-                showsExactSeconds.toggle()
+                showsMinutesAndSeconds.toggle()
             } label: {
                 Text(displayedETA)
                     .font(.system(size: 24, weight: .regular, design: .rounded))
@@ -367,13 +367,13 @@ private struct ArrivalRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(showsExactSeconds ? "Show rounded arrival time" : "Show exact seconds")
+            .help(showsMinutesAndSeconds ? "Show whole minutes" : "Show minutes and seconds")
             .accessibilityLabel("Arrival time")
             .accessibilityValue(displayedETA)
             .accessibilityHint(
-                showsExactSeconds
-                    ? "Click to show the rounded arrival time."
-                    : "Click to show the exact time in seconds."
+                showsMinutesAndSeconds
+                    ? "Click to show the arrival time in whole minutes."
+                    : "Click to show the arrival time in minutes and seconds."
             )
         }
         .padding(.horizontal, 18)

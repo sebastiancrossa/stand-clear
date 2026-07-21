@@ -2,13 +2,13 @@
 import XCTest
 
 final class ArrivalBoardTests: XCTestCase {
-    func testExactETAUsesSecondsAndNeverFallsBelowZero() {
+    func testETAUsesFlooredMinutesAndMinutesSecondsCountdown() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let futureArrival = makeArrival(
             id: "future-q",
             route: "Q",
             station: "R16",
-            time: now.addingTimeInterval(244.1)
+            time: now.addingTimeInterval(264.9)
         )
         let pastArrival = makeArrival(
             id: "past-q",
@@ -17,9 +17,10 @@ final class ArrivalBoardTests: XCTestCase {
             time: now.addingTimeInterval(-5)
         )
 
-        XCTAssertEqual(futureArrival.etaText(relativeTo: now), "5 min")
-        XCTAssertEqual(futureArrival.exactETASecondsText(relativeTo: now), "245 sec")
-        XCTAssertEqual(pastArrival.exactETASecondsText(relativeTo: now), "0 sec")
+        XCTAssertEqual(futureArrival.etaText(relativeTo: now), "4 min")
+        XCTAssertEqual(futureArrival.etaMinutesSecondsText(relativeTo: now), "4:24")
+        XCTAssertEqual(pastArrival.etaText(relativeTo: now), "0 min")
+        XCTAssertEqual(pastArrival.etaMinutesSecondsText(relativeTo: now), "0:00")
     }
 
     func testBoardFiltersByStationAndSelectedRoutesThenSortsByTime() {

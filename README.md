@@ -27,7 +27,7 @@ On first launch, the app opens directly to the direction-and-line picker with ev
 
 The app refreshes live arrival data every 30 seconds. The menu bar label shows the next selected train and its ETA; click it to open the full board or edit the saved filters.
 
-Click an arrival’s ETA to switch that row to an exact seconds countdown. Click it again to return to the rounded ETA.
+Click an arrival’s ETA to switch that row from floored whole minutes, such as `4 min`, to a minutes-and-seconds countdown, such as `4:24`. Click it again to return to whole minutes.
 
 To update the bundled station coordinates from the latest regular MTA static feed:
 
