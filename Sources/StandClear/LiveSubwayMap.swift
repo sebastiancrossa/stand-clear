@@ -1,5 +1,6 @@
 import AppKit
 import CoreLocation
+import CoreText
 import MapKit
 import os
 import QuartzCore
@@ -877,6 +878,21 @@ private final class TrainNetworkOverlay: NSObject, MKOverlay {
 }
 
 private final class TrainNetworkRenderer: MKOverlayRenderer {
+    private struct GlyphCacheKey: Hashable {
+        let text: String
+        let fontName: String
+        let fontSize: CGFloat
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        let alpha: CGFloat
+    }
+
+    private struct CenteredGlyph {
+        let line: CTLine
+        let opticalBounds: CGRect
+    }
+
     var groups: [LiveMapTrainGroup] = []
     var selectedTrainID: TrainRunID?
     var reduceMotion = false
@@ -886,6 +902,9 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
     private let signposter = OSSignposter(
         subsystem: Bundle.main.bundleIdentifier ?? "com.standclear.app",
         category: "LiveMapRenderer"
+    )
+    private let glyphCache = OSAllocatedUnfairLock(
+        initialState: [GlyphCacheKey: CenteredGlyph]()
     )
 
     override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
@@ -969,24 +988,6 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
         defer { context.restoreGState() }
         context.setAlpha(alpha * healthAlpha)
 
-        if isSelected {
-            context.setFillColor(NSColor.white.withAlphaComponent(0.30).cgColor)
-            context.addPath(
-                CGPath(
-                    roundedRect: CGRect(
-                    x: point.x - halfWidth - (5 * mapUnitsPerPoint),
-                    y: point.y - halfHeight - (5 * mapUnitsPerPoint),
-                    width: (halfWidth + (5 * mapUnitsPerPoint)) * 2,
-                    height: (halfHeight + (5 * mapUnitsPerPoint)) * 2
-                    ),
-                    cornerWidth: halfHeight + (5 * mapUnitsPerPoint),
-                    cornerHeight: halfHeight + (5 * mapUnitsPerPoint),
-                    transform: nil
-                )
-            )
-            context.fillPath()
-        }
-
         let routeColor = colorsByRouteID[snapshot.routeID]
             ?? NSColor(hexString: RouteColor.backgroundHex(for: snapshot.routeID))
         context.saveGState()
@@ -1000,6 +1001,20 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
             cornerHeight: halfHeight,
             transform: nil
         )
+        if isSelected {
+            let selectionInset = 4 * mapUnitsPerPoint
+            context.setStrokeColor(NSColor.white.withAlphaComponent(0.88).cgColor)
+            context.setLineWidth(2.5 * mapUnitsPerPoint)
+            context.addPath(
+                CGPath(
+                    roundedRect: markerRect.insetBy(dx: -selectionInset, dy: -selectionInset),
+                    cornerWidth: halfHeight + selectionInset,
+                    cornerHeight: halfHeight + selectionInset,
+                    transform: nil
+                )
+            )
+            context.strokePath()
+        }
         context.setFillColor(routeColor.cgColor)
         context.addPath(bodyPath)
         context.fillPath()
@@ -1089,41 +1104,43 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
         context.saveGState()
         defer { context.restoreGState() }
         if let selectedTrainID, group.snapshots.contains(where: { $0.id == selectedTrainID }) {
-            context.setFillColor(NSColor.white.withAlphaComponent(0.28).cgColor)
-            context.fillEllipse(in: rect.insetBy(dx: -5 * mapUnitsPerPoint, dy: -5 * mapUnitsPerPoint))
+            context.setStrokeColor(NSColor.white.withAlphaComponent(0.88).cgColor)
+            context.setLineWidth(2.5 * mapUnitsPerPoint)
+            context.strokeEllipse(in: rect.insetBy(dx: -4 * mapUnitsPerPoint, dy: -4 * mapUnitsPerPoint))
         }
         let fillColor = routes.count == 1
             ? colorsByRouteID[routes[0]] ?? NSColor(hexString: RouteColor.backgroundHex(for: routes[0]))
             : NSColor.black.withAlphaComponent(0.9)
         context.setFillColor(fillColor.cgColor)
         context.fillEllipse(in: rect)
+        context.setStrokeColor(NSColor.black.withAlphaComponent(0.9).cgColor)
+        context.setLineWidth((routes.count == 1 ? 2.5 : 5) * mapUnitsPerPoint)
+        context.strokeEllipse(in: rect)
 
-        let routeCount = max(1, routes.count)
-        for (index, route) in routes.enumerated() {
-            let start = CGFloat(index) / CGFloat(routeCount) * 2 * .pi - (.pi / 2)
-            let end = CGFloat(index + 1) / CGFloat(routeCount) * 2 * .pi - (.pi / 2)
-            context.setStrokeColor(
-                (colorsByRouteID[route] ?? NSColor(hexString: RouteColor.backgroundHex(for: route))).cgColor
-            )
-            context.setLineWidth(3 * mapUnitsPerPoint)
-            context.addArc(center: point, radius: radius, startAngle: start, endAngle: end, clockwise: false)
-            context.strokePath()
+        if routes.count > 1 {
+            for (index, route) in routes.enumerated() {
+                let start = CGFloat(index) / CGFloat(routes.count) * 2 * .pi - (.pi / 2)
+                let end = CGFloat(index + 1) / CGFloat(routes.count) * 2 * .pi - (.pi / 2)
+                context.setStrokeColor(
+                    (colorsByRouteID[route] ?? NSColor(hexString: RouteColor.backgroundHex(for: route))).cgColor
+                )
+                context.setLineWidth(3 * mapUnitsPerPoint)
+                context.addArc(center: point, radius: radius, startAngle: start, endAngle: end, clockwise: false)
+                context.strokePath()
+            }
         }
 
-        let label = "\(group.snapshots.count)" as NSString
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.monospacedDigitSystemFont(ofSize: 10 * mapUnitsPerPoint, weight: .bold),
-            .foregroundColor: NSColor.white,
-        ]
-        let size = label.size(withAttributes: attributes)
-        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphicsContext
-        label.draw(
-            at: CGPoint(x: point.x - (size.width / 2), y: point.y - (size.height / 2)),
-            withAttributes: attributes
+        let labelColor = routes.count == 1
+            ? textColorsByRouteID[routes[0]] ?? NSColor(hexString: RouteColor.textHex(for: routes[0]))
+            : NSColor.white
+        drawCenteredText(
+            "\(group.snapshots.count)",
+            font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
+            color: labelColor,
+            at: point,
+            mapUnitsPerPoint: mapUnitsPerPoint,
+            in: context
         )
-        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawRouteGlyph(
@@ -1132,23 +1149,70 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
         mapUnitsPerPoint: CGFloat,
         in context: CGContext
     ) {
-        let label = RouteID.displayLabel(routeID) as NSString
-        let font = NSFont.systemFont(ofSize: 9 * mapUnitsPerPoint, weight: .bold)
         let color = textColorsByRouteID[routeID]
             ?? NSColor(hexString: RouteColor.textHex(for: routeID))
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-        ]
-        let size = label.size(withAttributes: attributes)
-        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = graphicsContext
-        label.draw(
-            at: CGPoint(x: point.x - (size.width / 2), y: point.y - (size.height / 2)),
-            withAttributes: attributes
+        drawCenteredText(
+            RouteID.displayLabel(routeID),
+            font: NSFont.systemFont(ofSize: 9.5, weight: .bold),
+            color: color,
+            at: point,
+            mapUnitsPerPoint: mapUnitsPerPoint,
+            in: context
         )
-        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawCenteredText(
+        _ text: String,
+        font: NSFont,
+        color: NSColor,
+        at point: CGPoint,
+        mapUnitsPerPoint: CGFloat,
+        in context: CGContext
+    ) {
+        let displayColor = color.usingColorSpace(.deviceRGB) ?? color
+        let fontName = font.fontName
+        let fontSize = font.pointSize
+        let foregroundColor = displayColor.cgColor
+        let cacheKey = GlyphCacheKey(
+            text: text,
+            fontName: fontName,
+            fontSize: fontSize,
+            red: displayColor.redComponent,
+            green: displayColor.greenComponent,
+            blue: displayColor.blueComponent,
+            alpha: displayColor.alphaComponent
+        )
+        let glyph = glyphCache.withLock { cache -> CenteredGlyph in
+            if let cached = cache[cacheKey] {
+                return cached
+            }
+            if cache.count >= 256 {
+                cache.removeAll(keepingCapacity: true)
+            }
+            let coreTextFont = CTFontCreateWithName(fontName as CFString, fontSize, nil)
+            let attributedText = NSAttributedString(
+                string: text,
+                attributes: [
+                    NSAttributedString.Key(kCTFontAttributeName as String): coreTextFont,
+                    NSAttributedString.Key(kCTForegroundColorAttributeName as String): foregroundColor,
+                ]
+            )
+            let line = CTLineCreateWithAttributedString(attributedText)
+            let created = CenteredGlyph(
+                line: line,
+                opticalBounds: CTLineGetBoundsWithOptions(line, [.useOpticalBounds])
+            )
+            cache[cacheKey] = created
+            return created
+        }
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.translateBy(x: point.x, y: point.y)
+        context.scaleBy(x: mapUnitsPerPoint, y: -mapUnitsPerPoint)
+        context.textMatrix = .identity
+        context.textPosition = CGPoint(x: -glyph.opticalBounds.midX, y: -glyph.opticalBounds.midY)
+        CTLineDraw(glyph.line, context)
     }
 }
 
