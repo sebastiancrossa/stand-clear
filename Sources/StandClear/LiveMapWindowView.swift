@@ -5,6 +5,8 @@ struct LiveMapWindowView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var session = LiveMapSession()
+    @State private var mapActivity = LiveMapActivitySummary.empty
+    @State private var clusterSnapshots: [TrainRenderSnapshot] = []
 
     var body: some View {
         return ZStack {
@@ -21,6 +23,7 @@ struct LiveMapWindowView: View {
             synchronizeSession()
         }
         .onReceive(model.$mapMotionPlans) { _ in
+            clusterSnapshots = []
             reconcileSelection(at: model.now)
         }
         .onReceive(model.$now) { date in
@@ -76,18 +79,39 @@ struct LiveMapWindowView: View {
         return ZStack {
             LiveSubwayMap(
                 geometry: geometry,
+                stations: model.mapStations,
                 motionPlans: model.mapMotionPlans,
                 selectedRoutes: session.selectedRoutes,
                 selectedTrainID: session.selectedTrainID,
+                unplacedTrainCount: session.selectedRoutes.reduce(0) {
+                    $0 + (model.mapUnplacedTrainCountsByRoute[$1] ?? 0)
+                },
                 userLocation: model.locationService.location,
                 resetToken: session.resetToken,
                 reduceMotion: reduceMotion,
                 now: model.now
             ) { snapshot in
+                clusterSnapshots = []
                 session.selectTrain(id: snapshot?.id)
+            } onSelectCluster: { snapshots in
+                session.selectTrain(id: nil)
+                clusterSnapshots = snapshots
+            } onActivityChange: { summary in
+                mapActivity = summary
+                if !clusterSnapshots.isEmpty {
+                    let selectedClusterIDs = Set(clusterSnapshots.map(\.id))
+                    if !summary.clusterTrainIDSets.contains(selectedClusterIDs) {
+                        clusterSnapshots = []
+                    }
+                }
             }
             .ignoresSafeArea()
+            .accessibilityElement(children: .contain)
             .accessibilityLabel("Live NYC subway map")
+            .accessibilityValue(
+                "\(mapActivity.visibleTrainCount) visible trains, "
+                    + "\(mapActivity.activeTrainCount) active trains"
+            )
             .accessibilityHint("Estimated train positions. Use the route controls and train menu to explore.")
 
             VStack(spacing: 10) {
@@ -95,12 +119,11 @@ struct LiveMapWindowView: View {
                 routeFilters(geometry)
                 Spacer(minLength: 12)
 
-                if session.needsRouteRecovery {
-                    routeRecovery
-                }
-
                 if let selectedSnapshot {
                     trainInspector(selectedSnapshot)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                } else if !clusterSnapshots.isEmpty {
+                    clusterChooser(clusterSnapshots)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -115,6 +138,7 @@ struct LiveMapWindowView: View {
             Spacer(minLength: 10)
             trainPicker(snapshots)
             Button {
+                clusterSnapshots = []
                 session.requestReset()
             } label: {
                 Label("Reset", systemImage: "arrow.counterclockwise")
@@ -132,59 +156,137 @@ struct LiveMapWindowView: View {
             now: model.now,
             failureMessage: model.feedWarning
         )
-        return HStack(spacing: 8) {
-            Circle()
-                .fill(feedStatusColor(presentation.state))
-                .frame(width: 8, height: 8)
-                .overlay {
-                    if presentation.state == .waiting {
-                        ProgressView()
-                            .controlSize(.mini)
+        let affectedStatuses = model.mapFeedStatuses.filter { status in
+            status.state == .failed
+                || status.feedTimestamp.map { model.now.timeIntervalSince($0) >= 60 } != false
+        }
+        return Menu {
+            Text(presentation.title)
+            if let detail = presentation.detail {
+                Text(detail)
+            }
+            if !affectedStatuses.isEmpty {
+                Divider()
+                ForEach(affectedStatuses, id: \.self) { status in
+                    Text(feedStatusDetail(status))
+                }
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(feedStatusColor(presentation.state))
+                    .frame(width: 8, height: 8)
+                    .overlay {
+                        if presentation.state == .waiting {
+                            ProgressView()
+                                .controlSize(.mini)
+                        }
+                    }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(presentation.title)
+                        .font(.caption.weight(.semibold))
+                    if let timestamp = presentation.timestamp {
+                        (Text("Updated ") + Text(timestamp, style: .relative))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    } else if let detail = presentation.detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(presentation.title)
-                    .font(.caption.weight(.semibold))
-                if let timestamp = presentation.timestamp {
-                    (Text("Updated ") + Text(timestamp, style: .relative))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else if let detail = presentation.detail {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                if presentation.state == .partial
+                    || presentation.state == .stale
+                    || presentation.state == .unavailable
+                {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.yellow)
+                        .accessibilityHidden(true)
+                    if let detail = presentation.detail {
+                        Text(detail)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
                 }
             }
-
-            if presentation.state == .partial
-                || presentation.state == .stale
-                || presentation.state == .unavailable
-            {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
-                    .accessibilityHidden(true)
-                if let detail = presentation.detail {
-                    Text(detail)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.ultraThickMaterial, in: Capsule())
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThickMaterial, in: Capsule())
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
     }
 
+    private func feedStatusDetail(_ status: RealtimeFeedStatus) -> String {
+        let routes = RouteID.sorted(status.routeIDs).map(RouteID.displayLabel).joined(separator: ", ")
+        if status.state == .failed {
+            return "\(routes): feed unavailable"
+        }
+        guard let timestamp = status.feedTimestamp else {
+            return "\(routes): feed timestamp unavailable"
+        }
+        return "\(routes): \(Int(model.now.timeIntervalSince(timestamp))) seconds old"
+    }
+
     private func trainPicker(_ snapshots: [TrainRenderSnapshot]) -> some View {
-        Menu {
-            if snapshots.isEmpty {
+        let visibleSnapshots = snapshots.filter { mapActivity.visibleTrainIDs.contains($0.id) }
+        let relevantStatuses = model.mapFeedStatuses.filter {
+            !$0.routeIDs.isDisjoint(with: session.selectedRoutes)
+        }
+        let affectedStatuses = relevantStatuses.filter { status in
+            status.state == .failed
+                || status.feedTimestamp.map { model.now.timeIntervalSince($0) >= 60 } != false
+        }
+        let expiredCount = session.selectedRoutes.reduce(0) {
+            $0 + (model.mapProjectionCoverage.expiredTrainCountsByRoute[$1] ?? 0)
+        }
+        let placementGaps = relevantStatuses.filter { status in
+            let eligible = model.mapProjectionCoverage.eligibleTrainCountsByFeed[status.feedID] ?? 0
+            let placed = model.mapProjectionCoverage.placedTrainCountsByFeed[status.feedID] ?? 0
+            return eligible > placed
+        }
+        return Menu {
+            Text("\(mapActivity.activeTrainCount) active across selected lines")
+            if mapActivity.clusterCount > 0 {
+                Text("\(mapActivity.clusterCount) overlapping group\(mapActivity.clusterCount == 1 ? "" : "s")")
+            }
+            if mapActivity.unplacedTrainCount > 0 {
+                Text("\(mapActivity.unplacedTrainCount) reported run\(mapActivity.unplacedTrainCount == 1 ? "" : "s") unavailable on map")
+                let routes = RouteID.sorted(model.mapUnplacedRouteIDs.intersection(session.selectedRoutes))
+                if !routes.isEmpty {
+                    Text("Affected: \(routes.map(RouteID.displayLabel).joined(separator: ", "))")
+                }
+            }
+            if expiredCount > 0 {
+                Text("\(expiredCount) expired run\(expiredCount == 1 ? "" : "s") excluded")
+            }
+            if !affectedStatuses.isEmpty {
+                Divider()
+                Text("Realtime feed health")
+                ForEach(affectedStatuses, id: \.self) { status in
+                    Text(feedStatusDetail(status))
+                }
+            }
+            if !placementGaps.isEmpty {
+                Divider()
+                Text("Map placement")
+                ForEach(placementGaps, id: \.self) { status in
+                    Text(feedPlacementDetail(status))
+                }
+            }
+            Divider()
+            Text("● Station  ▰ Live train")
+            Divider()
+            if visibleSnapshots.isEmpty {
                 Text("No visible trains")
             } else {
-                ForEach(snapshots) { snapshot in
+                ForEach(visibleSnapshots) { snapshot in
                     Button {
+                        clusterSnapshots = []
                         session.selectTrain(id: snapshot.id)
                     } label: {
                         Text("\(RouteID.displayLabel(snapshot.routeID)) · \(destinationText(snapshot))")
@@ -192,16 +294,52 @@ struct LiveMapWindowView: View {
                 }
             }
         } label: {
-            Label("\(snapshots.count) trains", systemImage: "tram.fill")
+            Label(
+                "\(mapActivity.visibleTrainCount) visible · \(mapActivity.activeTrainCount) active",
+                systemImage: "tram.fill"
+            )
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(MapToolbarButtonStyle())
-        .accessibilityLabel("Choose a train, \(snapshots.count) available")
+        .accessibilityLabel(
+            "Choose a visible train, \(mapActivity.visibleTrainCount) visible, "
+                + "\(mapActivity.activeTrainCount) active"
+        )
+    }
+
+    private func feedPlacementDetail(_ status: RealtimeFeedStatus) -> String {
+        let routes = RouteID.sorted(status.routeIDs).map(RouteID.displayLabel).joined(separator: ", ")
+        let eligible = model.mapProjectionCoverage.eligibleTrainCountsByFeed[status.feedID] ?? 0
+        let placed = model.mapProjectionCoverage.placedTrainCountsByFeed[status.feedID] ?? 0
+        return "\(routes): \(placed) of \(eligible) runs placed"
     }
 
     private func routeFilters(_ geometry: TrackGeometryCatalog) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 7) {
+                Button {
+                    clusterSnapshots = []
+                    session.showAllRoutes()
+                } label: {
+                    Text("All")
+                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                        .foregroundStyle(session.isShowingAllRoutes ? Color.black : .secondary)
+                        .frame(minHeight: 24)
+                        .padding(.horizontal, 8)
+                        .background(
+                            session.isShowingAllRoutes ? Color.white : Color.black.opacity(0.68),
+                            in: Capsule()
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(session.isShowingAllRoutes ? 0.55 : 0.22), lineWidth: 1)
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("All subway lines")
+                .accessibilityValue(session.isShowingAllRoutes ? "Shown" : "Custom lines shown")
+                .accessibilityHint("Shows the full subway system without changing arrival preferences.")
+
                 ForEach(RouteID.sorted(session.allRoutes), id: \.self) { routeID in
                     let selected = session.isRouteVisible(routeID)
                     let style = geometry.style(forRoute: routeID)
@@ -209,6 +347,7 @@ struct LiveMapWindowView: View {
                     let foreground = Color(hexString: style.foregroundHex)
 
                     Button {
+                        clusterSnapshots = []
                         session.toggleRoute(routeID)
                     } label: {
                         Text(RouteID.displayLabel(routeID))
@@ -225,30 +364,16 @@ struct LiveMapWindowView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("\(RouteID.displayLabel(routeID)) train")
                     .accessibilityValue(selected ? "Shown" : "Hidden")
-                    .accessibilityHint("Toggles this route without changing arrival preferences.")
+                    .accessibilityHint(
+                        session.isShowingAllRoutes
+                            ? "Focuses this route without changing arrival preferences."
+                            : "Adds or removes this route without changing arrival preferences."
+                    )
                 }
             }
             .padding(8)
         }
         .background(.ultraThickMaterial, in: Capsule())
-    }
-
-    private var routeRecovery: some View {
-        VStack(spacing: 9) {
-            Text("All routes are hidden")
-                .font(.headline)
-            Text("Choose a route above or restore the full system.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Button("Show all routes") {
-                session.showAllRoutes()
-            }
-            .keyboardShortcut("a", modifiers: [.command, .shift])
-        }
-        .padding(16)
-        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .shadow(radius: 14)
-        .accessibilityElement(children: .contain)
     }
 
     private func trainInspector(_ snapshot: TrainRenderSnapshot) -> some View {
@@ -309,6 +434,61 @@ struct LiveMapWindowView: View {
         .shadow(radius: 18)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(trainAccessibilityLabel(snapshot))
+    }
+
+    private func clusterChooser(_ snapshots: [TrainRenderSnapshot]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("\(snapshots.count) trains at this location")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    clusterSnapshots = []
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close overlapping trains")
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(snapshots) { snapshot in
+                        Button {
+                            clusterSnapshots = []
+                            session.selectTrain(id: snapshot.id)
+                        } label: {
+                            HStack(spacing: 7) {
+                                routeBadge(snapshot.routeID)
+                                    .scaleEffect(0.72)
+                                    .frame(width: 30, height: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(destinationText(snapshot))
+                                        .font(.caption.weight(.semibold))
+                                    Text(directionText(snapshot.direction))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(15)
+        .frame(maxWidth: 700)
+        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .shadow(radius: 18)
+        .accessibilityElement(children: .contain)
     }
 
     private func routeBadge(_ routeID: String) -> some View {

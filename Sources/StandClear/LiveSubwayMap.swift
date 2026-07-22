@@ -8,21 +8,30 @@ import SwiftUI
 
 struct LiveSubwayMap: NSViewRepresentable {
     let geometry: TrackGeometryCatalog
+    let stations: [LiveMapStation]
     let motionPlans: [TrainMotionPlan]
     let selectedRoutes: Set<String>
     let selectedTrainID: TrainRunID?
+    let unplacedTrainCount: Int
     let userLocation: CLLocation?
     let resetToken: Int
     let reduceMotion: Bool
     let now: Date
     let onSelectTrain: (TrainRenderSnapshot?) -> Void
+    let onSelectCluster: ([TrainRenderSnapshot]) -> Void
+    let onActivityChange: (LiveMapActivitySummary) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelectTrain: onSelectTrain)
+        Coordinator(
+            onSelectTrain: onSelectTrain,
+            onSelectCluster: onSelectCluster,
+            onActivityChange: onActivityChange
+        )
     }
 
     func makeNSView(context: Context) -> MKMapView {
         let mapView = LiveMapKitView(frame: .zero)
+        mapView.appearance = NSAppearance(named: .darkAqua)
         let configuration = MKStandardMapConfiguration(
             elevationStyle: .flat,
             emphasisStyle: .muted
@@ -38,9 +47,11 @@ struct LiveSubwayMap: NSViewRepresentable {
         context.coordinator.attach(
             to: mapView,
             geometry: geometry,
+            stations: stations,
             motionPlans: motionPlans,
             selectedRoutes: selectedRoutes,
             selectedTrainID: selectedTrainID,
+            unplacedTrainCount: unplacedTrainCount,
             userLocation: userLocation,
             reduceMotion: reduceMotion,
             now: now
@@ -50,10 +61,13 @@ struct LiveSubwayMap: NSViewRepresentable {
 
     func updateNSView(_ mapView: MKMapView, context: Context) {
         context.coordinator.onSelectTrain = onSelectTrain
+        context.coordinator.onSelectCluster = onSelectCluster
+        context.coordinator.onActivityChange = onActivityChange
         context.coordinator.update(
             motionPlans: motionPlans,
             selectedRoutes: selectedRoutes,
             selectedTrainID: selectedTrainID,
+            unplacedTrainCount: unplacedTrainCount,
             userLocation: userLocation,
             resetToken: resetToken,
             reduceMotion: reduceMotion,
@@ -68,6 +82,8 @@ struct LiveSubwayMap: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, MKMapViewDelegate {
         var onSelectTrain: (TrainRenderSnapshot?) -> Void
+        var onSelectCluster: ([TrainRenderSnapshot]) -> Void
+        var onActivityChange: (LiveMapActivitySummary) -> Void
 
         private weak var mapView: MKMapView?
         private var displayLink: CADisplayLink?
@@ -78,24 +94,38 @@ struct LiveSubwayMap: NSViewRepresentable {
         private var reducedMotionRenderDate: Date?
         private var selectedRoutes: Set<String> = []
         private var selectedTrainID: TrainRunID?
+        private var unplacedTrainCount = 0
         private var snapshots: [TrainRenderSnapshot] = []
+        private var trainGroups: [LiveMapTrainGroup] = []
+        private var lastActivitySummary = LiveMapActivitySummary.empty
+        private var stations: [LiveMapStation] = []
+        private var pendingClusterTrainIDs: Set<TrainRunID>?
         private var lastResetToken = 0
         private var reduceMotion = false
         private var trackOverlay: TrackNetworkOverlay?
         private weak var trackRenderer: TrackNetworkRenderer?
+        private weak var stationRenderer: StationNetworkRenderer?
         private weak var trainRenderer: TrainNetworkRenderer?
         private var userLocationAnnotation: PassiveUserLocationAnnotation?
 
-        init(onSelectTrain: @escaping (TrainRenderSnapshot?) -> Void) {
+        init(
+            onSelectTrain: @escaping (TrainRenderSnapshot?) -> Void,
+            onSelectCluster: @escaping ([TrainRenderSnapshot]) -> Void,
+            onActivityChange: @escaping (LiveMapActivitySummary) -> Void
+        ) {
             self.onSelectTrain = onSelectTrain
+            self.onSelectCluster = onSelectCluster
+            self.onActivityChange = onActivityChange
         }
 
         func attach(
             to mapView: MKMapView,
             geometry: TrackGeometryCatalog,
+            stations: [LiveMapStation],
             motionPlans: [TrainMotionPlan],
             selectedRoutes: Set<String>,
             selectedTrainID: TrainRunID?,
+            unplacedTrainCount: Int,
             userLocation: CLLocation?,
             reduceMotion: Bool,
             now: Date
@@ -105,13 +135,17 @@ struct LiveSubwayMap: NSViewRepresentable {
             motionPlanRevision = LiveMapMotionRevision(plans: motionPlans)
             self.selectedRoutes = selectedRoutes
             self.selectedTrainID = selectedTrainID
+            self.unplacedTrainCount = unplacedTrainCount
+            self.stations = stations
             self.reduceMotion = reduceMotion
             reducedMotionRenderDate = reduceMotion ? now : nil
 
             let trackOverlay = TrackNetworkOverlay(catalog: geometry)
+            let stationOverlay = StationNetworkOverlay(stations: stations)
             let trainOverlay = TrainNetworkOverlay()
             self.trackOverlay = trackOverlay
             mapView.addOverlay(trackOverlay, level: .aboveRoads)
+            mapView.addOverlay(stationOverlay, level: .aboveLabels)
             mapView.addOverlay(trainOverlay, level: .aboveLabels)
 
             let clickRecognizer = NSClickGestureRecognizer(target: self, action: #selector(didClickMap(_:)))
@@ -141,6 +175,7 @@ struct LiveSubwayMap: NSViewRepresentable {
             motionPlans: [TrainMotionPlan],
             selectedRoutes: Set<String>,
             selectedTrainID: TrainRunID?,
+            unplacedTrainCount: Int,
             userLocation: CLLocation?,
             resetToken: Int,
             reduceMotion: Bool,
@@ -148,11 +183,16 @@ struct LiveSubwayMap: NSViewRepresentable {
         ) {
             let newRevision = LiveMapMotionRevision(plans: motionPlans)
             let didReceiveNewPlans = newRevision != motionPlanRevision
+            let didChangeRoutes = selectedRoutes != self.selectedRoutes
             let didEnableReduceMotion = reduceMotion && !self.reduceMotion
+            if didReceiveNewPlans || didChangeRoutes {
+                pendingClusterTrainIDs = nil
+            }
             self.motionPlans = motionPlans
             motionPlanRevision = newRevision
             self.selectedRoutes = selectedRoutes
             self.selectedTrainID = selectedTrainID
+            self.unplacedTrainCount = unplacedTrainCount
             self.reduceMotion = reduceMotion
             if reduceMotion {
                 if LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
@@ -167,11 +207,13 @@ struct LiveSubwayMap: NSViewRepresentable {
             }
             updateDisplayLinkState()
             trackRenderer?.selectedRoutes = selectedRoutes
+            stationRenderer?.selectedRoutes = selectedRoutes
             updateUserLocation(userLocation)
             render(at: now)
 
             if resetToken != lastResetToken, let mapView {
                 lastResetToken = resetToken
+                pendingClusterTrainIDs = nil
                 showFullSystem(on: mapView, animated: !reduceMotion)
             }
         }
@@ -193,7 +235,7 @@ struct LiveSubwayMap: NSViewRepresentable {
             }
             if let overlay = overlay as? TrainNetworkOverlay {
                 let renderer = TrainNetworkRenderer(overlay: overlay)
-                renderer.snapshots = snapshots
+                renderer.groups = trainGroups
                 renderer.selectedTrainID = selectedTrainID
                 renderer.reduceMotion = reduceMotion
                 renderer.colorsByRouteID = trackOverlay?.colorsByRouteID ?? [:]
@@ -201,11 +243,34 @@ struct LiveSubwayMap: NSViewRepresentable {
                 trainRenderer = renderer
                 return renderer
             }
+            if let overlay = overlay as? StationNetworkOverlay {
+                let renderer = StationNetworkRenderer(overlay: overlay)
+                renderer.selectedRoutes = selectedRoutes
+                renderer.detail = LiveMapPresentation.stationDetail(
+                    longitudeDelta: mapView.region.span.longitudeDelta
+                )
+                stationRenderer = renderer
+                return renderer
+            }
             return MKOverlayRenderer(overlay: overlay)
         }
 
         func mapViewDidChangeVisibleRegion(_ mapView: MKMapView) {
+            stationRenderer?.detail = LiveMapPresentation.stationDetail(
+                longitudeDelta: mapView.region.span.longitudeDelta
+            )
             render(at: Date())
+        }
+
+        func mapView(_ mapView: MKMapView, regionDidChangeAnimated animated: Bool) {
+            render(at: Date())
+            guard let pendingClusterTrainIDs else { return }
+            self.pendingClusterTrainIDs = nil
+            guard let surviving = LiveMapPresentation.survivingCluster(
+                trainIDs: pendingClusterTrainIDs,
+                groups: trainGroups
+            ) else { return }
+            onSelectCluster(surviving.snapshots)
         }
 
         func mapView(_ mapView: MKMapView, viewFor annotation: any MKAnnotation) -> MKAnnotationView? {
@@ -250,15 +315,22 @@ struct LiveSubwayMap: NSViewRepresentable {
         @objc private func didClickMap(_ recognizer: NSClickGestureRecognizer) {
             guard recognizer.state == .ended, let mapView else { return }
             let clickPoint = recognizer.location(in: mapView)
-            let targets = snapshots.map { snapshot in
-                let coordinate = CLLocationCoordinate2D(
-                    latitude: snapshot.position.latitude,
-                    longitude: snapshot.position.longitude
-                )
-                return LiveMapHitTarget(snapshot: snapshot, point: mapView.convert(coordinate, toPointTo: mapView))
+            guard let hit = LiveMapPresentation.hitTest(trainGroups, at: clickPoint, radius: 18) else {
+                onSelectTrain(nil)
+                return
             }
-            let hit = LiveMapPresentation.hitTest(targets, at: clickPoint, radius: 15)
-            onSelectTrain(hit)
+            if hit.isCluster {
+                if LiveMapPresentation.clusterSelectionAction(
+                    longitudeDelta: mapView.region.span.longitudeDelta
+                ) == .zoom {
+                    pendingClusterTrainIDs = Set(hit.snapshots.map(\.id))
+                    zoom(to: hit, on: mapView)
+                } else {
+                    onSelectCluster(hit.snapshots)
+                }
+                return
+            }
+            onSelectTrain(hit.snapshots.first)
         }
 
         private func render(at date: Date) {
@@ -266,23 +338,71 @@ struct LiveSubwayMap: NSViewRepresentable {
             let renderDate = reduceMotion ? (reducedMotionRenderDate ?? date) : date
             let mapRect = mapView.visibleMapRect
             let bounds = GeographicBounds(mapRect: mapRect)
-            let rendered = motionPlans.lazy
-                .filter { self.selectedRoutes.contains($0.routeID) }
+            let activeSnapshots = motionPlans
+                .filter { selectedRoutes.contains($0.routeID) }
                 .compactMap { $0.render(at: renderDate) }
             let nextSnapshots = LiveMapPresentation.visibleSnapshots(
-                Array(rendered),
+                activeSnapshots,
                 selectedRoutes: selectedRoutes,
                 bounds: bounds
             )
+            let targets = nextSnapshots.map { snapshot in
+                LiveMapHitTarget(
+                    snapshot: snapshot,
+                    point: mapView.convert(
+                        CLLocationCoordinate2D(
+                            latitude: snapshot.position.latitude,
+                            longitude: snapshot.position.longitude
+                        ),
+                        toPointTo: mapView
+                    )
+                )
+            }
+            let nextGroups = LiveMapPresentation.trainGroups(targets, collisionDistance: 28)
             let needsRedraw = nextSnapshots != snapshots
+                || nextGroups.map(\.snapshots) != trainGroups.map(\.snapshots)
                 || trainRenderer?.selectedTrainID != selectedTrainID
                 || trainRenderer?.reduceMotion != reduceMotion
-            guard needsRedraw else { return }
             snapshots = nextSnapshots
-            trainRenderer?.snapshots = snapshots
+            trainGroups = nextGroups
+            (mapView as? LiveMapKitView)?.updateAccessibility(
+                stations: stations,
+                groups: trainGroups,
+                selectedRoutes: selectedRoutes
+            )
+            let activitySummary = LiveMapPresentation.activitySummary(
+                activeSnapshots: activeSnapshots,
+                visibleGroups: trainGroups,
+                unplacedTrainCount: unplacedTrainCount
+            )
+            if activitySummary != lastActivitySummary {
+                lastActivitySummary = activitySummary
+                DispatchQueue.main.async { [weak self] in
+                    self?.onActivityChange(activitySummary)
+                }
+            }
+            guard needsRedraw else { return }
+            trainRenderer?.groups = trainGroups
             trainRenderer?.selectedTrainID = selectedTrainID
             trainRenderer?.reduceMotion = reduceMotion
             trainRenderer?.setNeedsDisplay(mapRect)
+        }
+
+        private func zoom(to group: LiveMapTrainGroup, on mapView: MKMapView) {
+            guard !group.snapshots.isEmpty else { return }
+            let count = Double(group.snapshots.count)
+            let coordinate = CLLocationCoordinate2D(
+                latitude: group.snapshots.reduce(0) { $0 + $1.position.latitude } / count,
+                longitude: group.snapshots.reduce(0) { $0 + $1.position.longitude } / count
+            )
+            let span = MKCoordinateSpan(
+                latitudeDelta: 0.012,
+                longitudeDelta: 0.012
+            )
+            mapView.setRegion(
+                MKCoordinateRegion(center: coordinate, span: span),
+                animated: !reduceMotion
+            )
         }
 
         private func showFullSystem(on mapView: MKMapView, animated: Bool) {
@@ -369,10 +489,98 @@ struct LiveSubwayMap: NSViewRepresentable {
 
 private final class LiveMapKitView: MKMapView {
     var onWindowChange: (() -> Void)?
+    private var liveMapAccessibilityChildren: [NSAccessibilityElement] = []
+    private var accessibilityElementsByID: [String: NSAccessibilityElement] = [:]
+    private var lastAccessibilityUpdate = Date.distantPast
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         onWindowChange?()
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        (super.accessibilityChildren() ?? []) + liveMapAccessibilityChildren
+    }
+
+    func updateAccessibility(
+        stations: [LiveMapStation],
+        groups: [LiveMapTrainGroup],
+        selectedRoutes: Set<String>
+    ) {
+        guard NSWorkspace.shared.isVoiceOverEnabled else {
+            liveMapAccessibilityChildren = []
+            accessibilityElementsByID = [:]
+            return
+        }
+        let updateDate = Date()
+        guard updateDate.timeIntervalSince(lastAccessibilityUpdate) >= 0.5 else { return }
+        lastAccessibilityUpdate = updateDate
+        let detail = LiveMapPresentation.stationDetail(
+            longitudeDelta: region.span.longitudeDelta
+        )
+        var nextElementsByID: [String: NSAccessibilityElement] = [:]
+        let stationElements = LiveMapPresentation.visibleStations(
+            stations,
+            selectedRoutes: selectedRoutes,
+            detail: detail
+        ).compactMap { station -> NSAccessibilityElement? in
+            let coordinate = CLLocationCoordinate2D(
+                latitude: station.latitude,
+                longitude: station.longitude
+            )
+            let point = convert(coordinate, toPointTo: self)
+            guard bounds.insetBy(dx: -12, dy: -12).contains(point) else { return nil }
+            let id = "station:\(station.id)"
+            let element = accessibilityElement(
+                id: id,
+                label: LiveMapPresentation.stationAccessibilityLabel(station),
+                centeredAt: point,
+                size: 12
+            )
+            nextElementsByID[id] = element
+            return element
+        }
+        let trainElements = groups.map { group in
+            let runIDs = group.snapshots.map { snapshot in
+                let run = snapshot.id
+                return [run.feedID, run.routeID, run.tripID, run.serviceDate, run.startTime]
+                    .joined(separator: ":")
+            }.joined(separator: "|")
+            let id = "train:\(runIDs)"
+            let element = accessibilityElement(
+                id: id,
+                label: LiveMapPresentation.trainGroupAccessibilityLabel(group),
+                centeredAt: group.point,
+                size: group.isCluster ? 28 : 24
+            )
+            element.setAccessibilityHelp("Use the visible trains menu to inspect this marker.")
+            nextElementsByID[id] = element
+            return element
+        }
+        accessibilityElementsByID = nextElementsByID
+        liveMapAccessibilityChildren = stationElements + trainElements
+    }
+
+    private func accessibilityElement(
+        id: String,
+        label: String,
+        centeredAt point: CGPoint,
+        size: CGFloat
+    ) -> NSAccessibilityElement {
+        let localFrame = NSRect(
+            x: point.x - (size / 2),
+            y: point.y - (size / 2),
+            width: size,
+            height: size
+        )
+        let windowFrame = convert(localFrame, to: nil)
+        let screenFrame = window?.convertToScreen(windowFrame) ?? windowFrame
+        let element = accessibilityElementsByID[id] ?? NSAccessibilityElement()
+        element.setAccessibilityRole(.staticText)
+        element.setAccessibilityLabel(label)
+        element.setAccessibilityFrame(screenFrame)
+        element.setAccessibilityParent(self)
+        return element
     }
 }
 
@@ -557,13 +765,119 @@ private final class TrackNetworkRenderer: MKOverlayRenderer {
     }
 }
 
+private final class StationNetworkOverlay: NSObject, MKOverlay {
+    struct Item {
+        let station: LiveMapStation
+        let mapPoint: MKMapPoint
+        let boundingMapRect: MKMapRect
+    }
+
+    let coordinate: CLLocationCoordinate2D
+    let boundingMapRect: MKMapRect
+    let items: [Item]
+
+    init(stations: [LiveMapStation]) {
+        items = stations.map { station in
+            let mapPoint = MKMapPoint(
+                CLLocationCoordinate2D(latitude: station.latitude, longitude: station.longitude)
+            )
+            return Item(
+                station: station,
+                mapPoint: mapPoint,
+                boundingMapRect: MKMapRect(x: mapPoint.x, y: mapPoint.y, width: 0, height: 0)
+            )
+        }
+        boundingMapRect = items.reduce(MKMapRect.null) { $0.union($1.boundingMapRect) }
+        coordinate = MKMapPoint(x: boundingMapRect.midX, y: boundingMapRect.midY).coordinate
+    }
+}
+
+private final class StationNetworkRenderer: MKOverlayRenderer {
+    var selectedRoutes: Set<String> = [] {
+        didSet {
+            if selectedRoutes != oldValue { setNeedsDisplay() }
+        }
+    }
+
+    var detail: LiveMapStationDetail = .overview {
+        didSet {
+            if detail != oldValue { setNeedsDisplay() }
+        }
+    }
+
+    override func draw(_ mapRect: MKMapRect, zoomScale: MKZoomScale, in context: CGContext) {
+        guard let network = overlay as? StationNetworkOverlay else { return }
+        let mapUnitsPerPoint = 1 / max(zoomScale, .leastNonzeroMagnitude)
+        let expandedRect = mapRect.insetBy(
+            dx: -80 * Double(mapUnitsPerPoint),
+            dy: -24 * Double(mapUnitsPerPoint)
+        )
+        let visibleStationIDs = Set(
+            LiveMapPresentation.visibleStations(
+                network.items.map(\.station),
+                selectedRoutes: selectedRoutes,
+                detail: detail
+            ).map(\.id)
+        )
+        let visible = network.items.filter { item in
+            expandedRect.contains(item.mapPoint)
+                && visibleStationIDs.contains(item.station.id)
+        }
+        var occupiedLabelRects: [CGRect] = []
+
+        context.saveGState()
+        defer { context.restoreGState() }
+
+        for item in visible {
+            let point = point(for: item.mapPoint)
+            let radius: CGFloat = (item.station.isTransfer ? 4.2 : 2.7) * mapUnitsPerPoint
+            let rect = CGRect(
+                x: point.x - radius,
+                y: point.y - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+            context.setFillColor(NSColor.windowBackgroundColor.withAlphaComponent(0.95).cgColor)
+            context.fillEllipse(in: rect)
+            context.setStrokeColor(NSColor.white.withAlphaComponent(0.86).cgColor)
+            context.setLineWidth((item.station.isTransfer ? 1.5 : 1) * mapUnitsPerPoint)
+            context.strokeEllipse(in: rect)
+
+            guard detail == .close else { continue }
+            let label = item.station.name as NSString
+            let font = NSFont.systemFont(ofSize: 10 * mapUnitsPerPoint, weight: .semibold)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: NSColor.white.withAlphaComponent(0.9),
+            ]
+            let size = label.size(withAttributes: attributes)
+            let labelRect = CGRect(
+                x: point.x + (6 * mapUnitsPerPoint),
+                y: point.y - (size.height / 2),
+                width: size.width,
+                height: size.height
+            ).insetBy(dx: -2 * mapUnitsPerPoint, dy: -1 * mapUnitsPerPoint)
+            guard !occupiedLabelRects.contains(where: { $0.intersects(labelRect) }) else { continue }
+            occupiedLabelRects.append(labelRect)
+            let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = graphicsContext
+            label.draw(
+                at: CGPoint(x: labelRect.minX, y: labelRect.minY),
+                withAttributes: attributes
+            )
+            NSGraphicsContext.restoreGraphicsState()
+        }
+    }
+}
+
 private final class TrainNetworkOverlay: NSObject, MKOverlay {
     let coordinate = CLLocationCoordinate2D(latitude: 40.72, longitude: -73.94)
     let boundingMapRect = MKMapRect.world
 }
 
 private final class TrainNetworkRenderer: MKOverlayRenderer {
-    var snapshots: [TrainRenderSnapshot] = []
+    var groups: [LiveMapTrainGroup] = []
     var selectedTrainID: TrainRunID?
     var reduceMotion = false
     var colorsByRouteID: [String: NSColor] = [:]
@@ -578,18 +892,23 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
         let interval = signposter.beginInterval("DrawTrains")
         defer { signposter.endInterval("DrawTrains", interval) }
 
-        for snapshot in snapshots {
+        for group in groups {
+            guard let representative = group.snapshots.first else { continue }
+            let count = Double(group.snapshots.count)
             let mapPoint = MKMapPoint(
                 CLLocationCoordinate2D(
-                    latitude: snapshot.position.latitude,
-                    longitude: snapshot.position.longitude
+                    latitude: group.snapshots.reduce(0) { $0 + $1.position.latitude } / count,
+                    longitude: group.snapshots.reduce(0) { $0 + $1.position.longitude } / count
                 )
             )
             guard mapRect.insetBy(dx: -32 / Double(zoomScale), dy: -32 / Double(zoomScale)).contains(mapPoint) else {
                 continue
             }
 
-            if !reduceMotion,
+            if group.isCluster {
+                drawCluster(group, at: point(for: mapPoint), zoomScale: zoomScale, in: context)
+            } else if !reduceMotion,
+               let snapshot = group.snapshots.first,
                let oldPosition = snapshot.previousTopologyPosition,
                snapshot.topologyTransitionProgress < 1
             {
@@ -617,7 +936,7 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
                 )
             } else {
                 draw(
-                    snapshot,
+                    representative,
                     at: point(for: mapPoint),
                     alpha: 1,
                     zoomScale: zoomScale,
@@ -636,12 +955,13 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
     ) {
         let mapUnitsPerPoint = 1 / max(zoomScale, .leastNonzeroMagnitude)
         let isSelected = snapshot.id == selectedTrainID
-        let radius: CGFloat = (isSelected ? 11 : 9) * mapUnitsPerPoint
+        let halfWidth: CGFloat = (isSelected ? 11 : 9) * mapUnitsPerPoint
+        let halfHeight: CGFloat = (isSelected ? 16 : 14) * mapUnitsPerPoint
         let markerRect = CGRect(
-            x: point.x - radius,
-            y: point.y - radius,
-            width: radius * 2,
-            height: radius * 2
+            x: -halfWidth,
+            y: -halfHeight,
+            width: halfWidth * 2,
+            height: halfHeight * 2
         )
         let healthAlpha: Double = snapshot.health == .live ? 1 : 0.62
 
@@ -651,18 +971,47 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
 
         if isSelected {
             context.setFillColor(NSColor.white.withAlphaComponent(0.30).cgColor)
-            context.fillEllipse(
-                in: markerRect.insetBy(dx: -5 * mapUnitsPerPoint, dy: -5 * mapUnitsPerPoint)
+            context.addPath(
+                CGPath(
+                    roundedRect: CGRect(
+                    x: point.x - halfWidth - (5 * mapUnitsPerPoint),
+                    y: point.y - halfHeight - (5 * mapUnitsPerPoint),
+                    width: (halfWidth + (5 * mapUnitsPerPoint)) * 2,
+                    height: (halfHeight + (5 * mapUnitsPerPoint)) * 2
+                    ),
+                    cornerWidth: halfHeight + (5 * mapUnitsPerPoint),
+                    cornerHeight: halfHeight + (5 * mapUnitsPerPoint),
+                    transform: nil
+                )
             )
+            context.fillPath()
         }
 
         let routeColor = colorsByRouteID[snapshot.routeID]
             ?? NSColor(hexString: RouteColor.backgroundHex(for: snapshot.routeID))
+        context.saveGState()
+        context.translateBy(x: point.x, y: point.y)
+        if let heading = snapshot.headingDegrees {
+            context.rotate(by: CGFloat(heading * .pi / 180))
+        }
+        let bodyPath = CGPath(
+            roundedRect: markerRect,
+            cornerWidth: halfHeight,
+            cornerHeight: halfHeight,
+            transform: nil
+        )
         context.setFillColor(routeColor.cgColor)
-        context.fillEllipse(in: markerRect)
+        context.addPath(bodyPath)
+        context.fillPath()
+        context.move(to: CGPoint(x: 0, y: -halfHeight - (4 * mapUnitsPerPoint)))
+        context.addLine(to: CGPoint(x: -3.5 * mapUnitsPerPoint, y: -halfHeight + (1 * mapUnitsPerPoint)))
+        context.addLine(to: CGPoint(x: 3.5 * mapUnitsPerPoint, y: -halfHeight + (1 * mapUnitsPerPoint)))
+        context.closePath()
+        context.fillPath()
         context.setStrokeColor(NSColor.black.withAlphaComponent(0.88).cgColor)
         context.setLineWidth(2.5 * mapUnitsPerPoint)
-        context.strokeEllipse(in: markerRect)
+        context.addPath(bodyPath)
+        context.strokePath()
 
         if snapshot.confidence == .low || snapshot.health != .live {
             context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
@@ -671,14 +1020,22 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
                 phase: 0,
                 lengths: [2.5 * mapUnitsPerPoint, 2.5 * mapUnitsPerPoint]
             )
-            context.strokeEllipse(
-                in: markerRect.insetBy(
-                    dx: -2.5 * mapUnitsPerPoint,
-                    dy: -2.5 * mapUnitsPerPoint
+            context.addPath(
+                CGPath(
+                    roundedRect: markerRect.insetBy(
+                        dx: -2.5 * mapUnitsPerPoint,
+                        dy: -2.5 * mapUnitsPerPoint
+                    ),
+                    cornerWidth: halfHeight + (2.5 * mapUnitsPerPoint),
+                    cornerHeight: halfHeight + (2.5 * mapUnitsPerPoint),
+                    transform: nil
                 )
             )
+            context.strokePath()
             context.setLineDash(phase: 0, lengths: [])
         }
+
+        context.restoreGState()
 
         drawRouteGlyph(
             snapshot.routeID,
@@ -692,30 +1049,81 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
             context.setLineWidth(2 * mapUnitsPerPoint)
             context.move(
                 to: CGPoint(
-                    x: point.x + radius + (3 * mapUnitsPerPoint),
+                    x: point.x + halfWidth + (3 * mapUnitsPerPoint),
                     y: point.y - (3 * mapUnitsPerPoint)
                 )
             )
             context.addLine(
                 to: CGPoint(
-                    x: point.x + radius + (3 * mapUnitsPerPoint),
+                    x: point.x + halfWidth + (3 * mapUnitsPerPoint),
                     y: point.y + (3 * mapUnitsPerPoint)
                 )
             )
             context.move(
                 to: CGPoint(
-                    x: point.x + radius + (6 * mapUnitsPerPoint),
+                    x: point.x + halfWidth + (6 * mapUnitsPerPoint),
                     y: point.y - (3 * mapUnitsPerPoint)
                 )
             )
             context.addLine(
                 to: CGPoint(
-                    x: point.x + radius + (6 * mapUnitsPerPoint),
+                    x: point.x + halfWidth + (6 * mapUnitsPerPoint),
                     y: point.y + (3 * mapUnitsPerPoint)
                 )
             )
             context.strokePath()
         }
+    }
+
+    private func drawCluster(
+        _ group: LiveMapTrainGroup,
+        at point: CGPoint,
+        zoomScale: MKZoomScale,
+        in context: CGContext
+    ) {
+        let mapUnitsPerPoint = 1 / max(zoomScale, .leastNonzeroMagnitude)
+        let radius = 12 * mapUnitsPerPoint
+        let rect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+        let routes = RouteID.sorted(Set(group.snapshots.map(\.routeID)))
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        if let selectedTrainID, group.snapshots.contains(where: { $0.id == selectedTrainID }) {
+            context.setFillColor(NSColor.white.withAlphaComponent(0.28).cgColor)
+            context.fillEllipse(in: rect.insetBy(dx: -5 * mapUnitsPerPoint, dy: -5 * mapUnitsPerPoint))
+        }
+        let fillColor = routes.count == 1
+            ? colorsByRouteID[routes[0]] ?? NSColor(hexString: RouteColor.backgroundHex(for: routes[0]))
+            : NSColor.black.withAlphaComponent(0.9)
+        context.setFillColor(fillColor.cgColor)
+        context.fillEllipse(in: rect)
+
+        let routeCount = max(1, routes.count)
+        for (index, route) in routes.enumerated() {
+            let start = CGFloat(index) / CGFloat(routeCount) * 2 * .pi - (.pi / 2)
+            let end = CGFloat(index + 1) / CGFloat(routeCount) * 2 * .pi - (.pi / 2)
+            context.setStrokeColor(
+                (colorsByRouteID[route] ?? NSColor(hexString: RouteColor.backgroundHex(for: route))).cgColor
+            )
+            context.setLineWidth(3 * mapUnitsPerPoint)
+            context.addArc(center: point, radius: radius, startAngle: start, endAngle: end, clockwise: false)
+            context.strokePath()
+        }
+
+        let label = "\(group.snapshots.count)" as NSString
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 10 * mapUnitsPerPoint, weight: .bold),
+            .foregroundColor: NSColor.white,
+        ]
+        let size = label.size(withAttributes: attributes)
+        let graphicsContext = NSGraphicsContext(cgContext: context, flipped: true)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = graphicsContext
+        label.draw(
+            at: CGPoint(x: point.x - (size.width / 2), y: point.y - (size.height / 2)),
+            withAttributes: attributes
+        )
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawRouteGlyph(

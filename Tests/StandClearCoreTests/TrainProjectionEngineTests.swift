@@ -19,6 +19,8 @@ final class TrainProjectionEngineTests: XCTestCase {
         XCTAssertEqual(rendered.nextStopID, "BN")
         XCTAssertEqual(rendered.confidence, .medium)
         XCTAssertTrue(rendered.reasons.contains(.inferredDeparture))
+        XCTAssertNotNil(rendered.headingDegrees)
+        XCTAssertTrue((20...60).contains(try XCTUnwrap(rendered.headingDegrees)))
     }
 
     func testOrderedStopsSelectUniqueRouteDirectionPathWithoutShapeSuffix() throws {
@@ -48,6 +50,9 @@ final class TrainProjectionEngineTests: XCTestCase {
 
         let unmatched = train(tripID: "unknown", stops: [stop("ZZZ")])
         XCTAssertTrue(engine.update(observations: [unmatched], at: now).isEmpty)
+        XCTAssertEqual(engine.coverage.eligibleObservationCount, 1)
+        XCTAssertEqual(engine.coverage.placedTrainCount, 0)
+        XCTAssertEqual(engine.coverage.unplacedRouteIDs, ["Q"])
     }
 
     func testStoppedVehiclePinsAtStationAndTrackMismatchLowersConfidence() throws {
@@ -99,6 +104,47 @@ final class TrainProjectionEngineTests: XCTestCase {
         XCTAssertEqual(atSixty.position, atEightyNine.position)
         XCTAssertEqual(atEightyNine.velocityMetersPerSecond, 0)
         XCTAssertNil(plan.render(at: feedTime.addingTimeInterval(90)))
+    }
+
+    func testCoverageBreaksDownPlacedUnplacedAndExpiredObservationsByFeed() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let placed = train(
+            feedID: "feed-a",
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", arrival: now.addingTimeInterval(50))],
+            feedTimestamp: now
+        )
+        let unplaced = train(
+            feedID: "feed-b",
+            tripID: "unknown",
+            stops: [stop("ZZZ")],
+            feedTimestamp: now
+        )
+        let expired = train(
+            feedID: "feed-b",
+            tripID: "expired",
+            stops: [stop("BN")],
+            feedTimestamp: now.addingTimeInterval(-90)
+        )
+
+        _ = engine.update(
+            entries: [
+                .init(observation: placed, lastValidAt: now),
+                .init(observation: unplaced, lastValidAt: now),
+                .init(observation: expired, lastValidAt: now.addingTimeInterval(-90)),
+            ],
+            at: now
+        )
+
+        XCTAssertEqual(engine.coverage.eligibleTrainCountsByFeed, ["feed-a": 1, "feed-b": 1])
+        XCTAssertEqual(engine.coverage.placedTrainCountsByFeed, ["feed-a": 1])
+        XCTAssertEqual(engine.coverage.unplacedTrainCountsByFeed, ["feed-b": 1])
+        XCTAssertEqual(engine.coverage.eligibleTrainCountsByRoute, ["Q": 2])
+        XCTAssertEqual(engine.coverage.placedTrainCountsByRoute, ["Q": 1])
+        XCTAssertEqual(engine.coverage.expiredTrainCountsByRoute, ["Q": 1])
+        XCTAssertEqual(engine.coverage.expiredTrainCountsByFeed, ["feed-b": 1])
+        XCTAssertEqual(engine.coverage.expiredObservationCount, 1)
     }
 
     func testRetargetPreservesPositionAndNeverReversesOrOvershoots() throws {
@@ -249,6 +295,11 @@ final class TrainObservationCacheTests: XCTestCase {
             at: start.addingTimeInterval(120)
         )
         XCTAssertTrue(expired.isEmpty)
+        XCTAssertEqual(
+            Set(cache.coverageEntries(at: start.addingTimeInterval(120)).map(\.observation.id.tripID)),
+            ["a1", "b1"]
+        )
+        XCTAssertTrue(cache.coverageEntries(at: start.addingTimeInterval(210)).isEmpty)
     }
 }
 

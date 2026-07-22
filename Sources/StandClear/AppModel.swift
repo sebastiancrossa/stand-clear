@@ -125,10 +125,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var showsMinutesAndSeconds = false
     @Published private(set) var mapGeometry: TrackGeometryCatalog?
     @Published private(set) var mapMotionPlans: [TrainMotionPlan] = []
+    @Published private(set) var mapUnplacedRouteIDs: Set<String> = []
+    @Published private(set) var mapUnplacedTrainCountsByRoute: [String: Int] = [:]
+    @Published private(set) var mapProjectionCoverage = TrainProjectionCoverage.empty
     @Published private(set) var mapFeedStatuses: [RealtimeFeedStatus] = []
     @Published private(set) var mapLatestFeedTimestamp: Date?
     @Published private(set) var isMapGeometryLoading = false
     @Published private(set) var mapGeometryError: String?
+    private(set) var mapStations: [LiveMapStation] = []
 
     let locationService = LocationService()
 
@@ -204,6 +208,20 @@ final class AppModel: ObservableObject {
             startupError = error.localizedDescription
         }
         availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
+        mapStations = (catalog?.stations ?? []).map { station in
+            let related = catalog?.relatedStations(to: station.id) ?? [station.id]
+            let routes = catalog?.routes(serving: station.id) ?? []
+            let isTransfer = related.count > 1
+            return LiveMapStation(
+                id: station.id,
+                name: station.name,
+                latitude: station.latitude,
+                longitude: station.longitude,
+                routeIDs: routes,
+                isTransfer: isTransfer,
+                showsInOverview: isTransfer && station.id == related.sorted().first
+            )
+        }
 
         locationService.$location
             .sink { [weak self] location in
@@ -283,8 +301,11 @@ final class AppModel: ObservableObject {
             if let latestFeedTimestamp = snapshot.latestFeedTimestamp {
                 mapLatestFeedTimestamp = latestFeedTimestamp
             }
-            let entries = trainObservationCache.merge(snapshot, at: refreshDate)
-            updateMapMotionPlans(entries: entries, at: refreshDate)
+            _ = trainObservationCache.merge(snapshot, at: refreshDate)
+            updateMapMotionPlans(
+                entries: trainObservationCache.coverageEntries(at: refreshDate),
+                at: refreshDate
+            )
             updateAvailableRoutes()
         } catch {
             feedWarning = error.localizedDescription
@@ -298,7 +319,7 @@ final class AppModel: ObservableObject {
                 )
             }
             updateMapMotionPlans(
-                entries: trainObservationCache.entries(at: refreshDate),
+                entries: trainObservationCache.coverageEntries(at: refreshDate),
                 at: refreshDate
             )
         }
@@ -318,7 +339,7 @@ final class AppModel: ObservableObject {
             mapGeometry = geometry
             trainProjectionEngine = TrainProjectionEngine(catalog: geometry)
             updateMapMotionPlans(
-                entries: trainObservationCache.entries(at: now),
+                entries: trainObservationCache.coverageEntries(at: now),
                 at: now
             )
         } catch {
@@ -427,7 +448,11 @@ final class AppModel: ObservableObject {
         at date: Date
     ) {
         guard var engine = trainProjectionEngine else { return }
-        mapMotionPlans = engine.update(entries: entries, at: date)
+        let plans = engine.update(entries: entries, at: date)
+        mapMotionPlans = plans
+        mapUnplacedRouteIDs = engine.coverage.unplacedRouteIDs
+        mapUnplacedTrainCountsByRoute = engine.coverage.unplacedTrainCountsByRoute
+        mapProjectionCoverage = engine.coverage
         trainProjectionEngine = engine
     }
 

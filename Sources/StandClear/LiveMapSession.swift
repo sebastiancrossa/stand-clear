@@ -1,10 +1,15 @@
 import Combine
 import StandClearCore
 
+enum RouteSelectionMode: Equatable {
+    case all
+    case custom(Set<String>)
+}
+
 @MainActor
 final class LiveMapSession: ObservableObject {
     @Published private(set) var allRoutes: Set<String>
-    @Published private(set) var selectedRoutes: Set<String>
+    @Published private(set) var routeSelection: RouteSelectionMode = .all
     @Published private(set) var selectedTrainID: TrainRunID?
     @Published private(set) var resetToken = 0
 
@@ -13,43 +18,58 @@ final class LiveMapSession: ObservableObject {
     init(allRoutes: Set<String> = []) {
         let normalized = Set(allRoutes.map(RouteID.normalized))
         self.allRoutes = normalized
-        selectedRoutes = normalized
         hasInitializedRoutes = !normalized.isEmpty
     }
 
-    var needsRouteRecovery: Bool {
-        !allRoutes.isEmpty && selectedRoutes.isEmpty
+    var selectedRoutes: Set<String> {
+        switch routeSelection {
+        case .all: allRoutes
+        case let .custom(routes): routes
+        }
+    }
+
+    var isShowingAllRoutes: Bool {
+        routeSelection == .all
     }
 
     func updateAllRoutes(_ routes: Set<String>) {
         let normalized = Set(routes.map(RouteID.normalized))
         if !hasInitializedRoutes {
             allRoutes = normalized
-            selectedRoutes = normalized
             hasInitializedRoutes = !normalized.isEmpty
             return
         }
 
-        let addedRoutes = normalized.subtracting(allRoutes)
         allRoutes = normalized
-        selectedRoutes.formIntersection(normalized)
-        selectedRoutes.formUnion(addedRoutes)
+        if case let .custom(routes) = routeSelection {
+            let reconciled = routes.intersection(normalized)
+            routeSelection = reconciled.isEmpty || reconciled == normalized
+                ? .all
+                : .custom(reconciled)
+        }
         clearSelectionIfFiltered()
     }
 
     func toggleRoute(_ routeID: String) {
         let routeID = RouteID.normalized(routeID)
         guard allRoutes.contains(routeID) else { return }
-        if selectedRoutes.contains(routeID) {
-            selectedRoutes.remove(routeID)
-        } else {
-            selectedRoutes.insert(routeID)
+        switch routeSelection {
+        case .all:
+            routeSelection = .custom([routeID])
+        case var .custom(routes):
+            if routes.contains(routeID) {
+                routes.remove(routeID)
+            } else {
+                routes.insert(routeID)
+            }
+            routeSelection = routes.isEmpty || routes == allRoutes ? .all : .custom(routes)
         }
         clearSelectionIfFiltered()
     }
 
     func showAllRoutes() {
-        selectedRoutes = allRoutes
+        routeSelection = .all
+        clearSelectionIfFiltered()
     }
 
     func isRouteVisible(_ routeID: String) -> Bool {

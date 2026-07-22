@@ -51,6 +51,7 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
     public let nextStopID: String?
     public let nextArrivalTime: Date?
     public let position: TrainPosition
+    public let headingDegrees: Double?
     public let previousTopologyPosition: TrainPosition?
     public let topologyTransitionProgress: Double
     public let velocityMetersPerSecond: Double
@@ -66,6 +67,7 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
         nextStopID: String?,
         nextArrivalTime: Date?,
         position: TrainPosition,
+        headingDegrees: Double? = nil,
         previousTopologyPosition: TrainPosition?,
         topologyTransitionProgress: Double,
         velocityMetersPerSecond: Double,
@@ -80,6 +82,7 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
         self.nextStopID = nextStopID
         self.nextArrivalTime = nextArrivalTime
         self.position = position
+        self.headingDegrees = headingDegrees
         self.previousTopologyPosition = previousTopologyPosition
         self.topologyTransitionProgress = topologyTransitionProgress
         self.velocityMetersPerSecond = velocityMetersPerSecond
@@ -134,6 +137,7 @@ public struct TrainMotionPlan: Identifiable, Sendable {
             nextStopID: nextStopID,
             nextArrivalTime: nextArrivalTime,
             position: position,
+            headingDegrees: Self.heading(at: state.distance, on: pathPoints),
             previousTopologyPosition: oldPosition,
             topologyTransitionProgress: transitionProgress,
             velocityMetersPerSecond: health == .aging || health == .stalled ? 0 : state.velocity,
@@ -203,11 +207,88 @@ public struct TrainMotionPlan: Identifiable, Sendable {
             distanceMeters: distance
         )
     }
+
+    private static func heading(at distance: Double, on points: [TrackPoint]) -> Double? {
+        guard points.count >= 2 else { return nil }
+        let upperIndex = points.firstIndex { $0.distanceMeters >= distance } ?? (points.count - 1)
+        let lowerIndex = max(0, min(upperIndex - 1, points.count - 2))
+        let start = points[lowerIndex]
+        let end = points[lowerIndex + 1]
+        let latitudeDelta = end.latitude - start.latitude
+        let meanLatitude = (start.latitude + end.latitude) * .pi / 360
+        let longitudeDelta = (end.longitude - start.longitude) * cos(meanLatitude)
+        guard latitudeDelta != 0 || longitudeDelta != 0 else { return nil }
+        let degrees = atan2(longitudeDelta, latitudeDelta) * 180 / .pi
+        return degrees >= 0 ? degrees : degrees + 360
+    }
+}
+
+public struct TrainProjectionCoverage: Equatable, Sendable {
+    public let eligibleObservationCount: Int
+    public let placedTrainCount: Int
+    public let unplacedTrainCountsByRoute: [String: Int]
+    public let eligibleTrainCountsByRoute: [String: Int]
+    public let placedTrainCountsByRoute: [String: Int]
+    public let expiredTrainCountsByRoute: [String: Int]
+    public let eligibleTrainCountsByFeed: [String: Int]
+    public let placedTrainCountsByFeed: [String: Int]
+    public let unplacedTrainCountsByFeed: [String: Int]
+    public let expiredTrainCountsByFeed: [String: Int]
+    public let expiredObservationCount: Int
+
+    public var unplacedRouteIDs: Set<String> {
+        Set(unplacedTrainCountsByRoute.keys)
+    }
+
+    public var unplacedTrainCount: Int {
+        max(0, eligibleObservationCount - placedTrainCount)
+    }
+
+    public static let empty = TrainProjectionCoverage(
+        eligibleObservationCount: 0,
+        placedTrainCount: 0,
+        unplacedTrainCountsByRoute: [:],
+        eligibleTrainCountsByRoute: [:],
+        placedTrainCountsByRoute: [:],
+        expiredTrainCountsByRoute: [:],
+        eligibleTrainCountsByFeed: [:],
+        placedTrainCountsByFeed: [:],
+        unplacedTrainCountsByFeed: [:],
+        expiredTrainCountsByFeed: [:],
+        expiredObservationCount: 0
+    )
+
+    public init(
+        eligibleObservationCount: Int,
+        placedTrainCount: Int,
+        unplacedTrainCountsByRoute: [String: Int],
+        eligibleTrainCountsByRoute: [String: Int] = [:],
+        placedTrainCountsByRoute: [String: Int] = [:],
+        expiredTrainCountsByRoute: [String: Int] = [:],
+        eligibleTrainCountsByFeed: [String: Int] = [:],
+        placedTrainCountsByFeed: [String: Int] = [:],
+        unplacedTrainCountsByFeed: [String: Int] = [:],
+        expiredTrainCountsByFeed: [String: Int] = [:],
+        expiredObservationCount: Int = 0
+    ) {
+        self.eligibleObservationCount = eligibleObservationCount
+        self.placedTrainCount = placedTrainCount
+        self.unplacedTrainCountsByRoute = unplacedTrainCountsByRoute
+        self.eligibleTrainCountsByRoute = eligibleTrainCountsByRoute
+        self.placedTrainCountsByRoute = placedTrainCountsByRoute
+        self.expiredTrainCountsByRoute = expiredTrainCountsByRoute
+        self.eligibleTrainCountsByFeed = eligibleTrainCountsByFeed
+        self.placedTrainCountsByFeed = placedTrainCountsByFeed
+        self.unplacedTrainCountsByFeed = unplacedTrainCountsByFeed
+        self.expiredTrainCountsByFeed = expiredTrainCountsByFeed
+        self.expiredObservationCount = expiredObservationCount
+    }
 }
 
 public struct TrainProjectionEngine: Sendable {
     private let catalog: TrackGeometryCatalog
     private var plansByID: [TrainRunID: TrainMotionPlan] = [:]
+    public private(set) var coverage = TrainProjectionCoverage.empty
 
     public init(catalog: TrackGeometryCatalog) {
         self.catalog = catalog
@@ -234,10 +315,32 @@ public struct TrainProjectionEngine: Sendable {
         entries: [TrainObservationCache.Entry],
         at date: Date
     ) -> [TrainMotionPlan] {
+        let eligibleEntries = entries.filter { date.timeIntervalSince($0.lastValidAt) < 90 }
+        let expiredEntries = entries.filter { date.timeIntervalSince($0.lastValidAt) >= 90 }
         var nextPlans: [TrainRunID: TrainMotionPlan] = [:]
-        for entry in entries where date.timeIntervalSince(entry.lastValidAt) < 90 {
+        var unplacedTrainCountsByRoute: [String: Int] = [:]
+        let eligibleTrainCountsByRoute = Dictionary(grouping: eligibleEntries) {
+            $0.observation.routeID
+        }.mapValues(\.count)
+        let expiredTrainCountsByRoute = Dictionary(grouping: expiredEntries) {
+            $0.observation.routeID
+        }.mapValues(\.count)
+        let eligibleTrainCountsByFeed = Dictionary(grouping: eligibleEntries) {
+            $0.observation.id.feedID
+        }.mapValues(\.count)
+        let expiredTrainCountsByFeed = Dictionary(grouping: expiredEntries) {
+            $0.observation.id.feedID
+        }.mapValues(\.count)
+        var placedTrainCountsByRoute: [String: Int] = [:]
+        var placedTrainCountsByFeed: [String: Int] = [:]
+        var unplacedTrainCountsByFeed: [String: Int] = [:]
+        for entry in eligibleEntries {
             let observation = entry.observation
-            guard let match = match(for: observation) else { continue }
+            guard let match = match(for: observation) else {
+                unplacedTrainCountsByRoute[observation.routeID, default: 0] += 1
+                unplacedTrainCountsByFeed[observation.id.feedID, default: 0] += 1
+                continue
+            }
             let prior = plansByID[observation.id]
             guard let plan = makePlan(
                 observation: observation,
@@ -245,10 +348,29 @@ public struct TrainProjectionEngine: Sendable {
                 match: match,
                 prior: prior,
                 at: date
-            ) else { continue }
+            ) else {
+                unplacedTrainCountsByRoute[observation.routeID, default: 0] += 1
+                unplacedTrainCountsByFeed[observation.id.feedID, default: 0] += 1
+                continue
+            }
             nextPlans[observation.id] = plan
+            placedTrainCountsByRoute[observation.routeID, default: 0] += 1
+            placedTrainCountsByFeed[observation.id.feedID, default: 0] += 1
         }
         plansByID = nextPlans
+        coverage = TrainProjectionCoverage(
+            eligibleObservationCount: eligibleEntries.count,
+            placedTrainCount: nextPlans.count,
+            unplacedTrainCountsByRoute: unplacedTrainCountsByRoute,
+            eligibleTrainCountsByRoute: eligibleTrainCountsByRoute,
+            placedTrainCountsByRoute: placedTrainCountsByRoute,
+            expiredTrainCountsByRoute: expiredTrainCountsByRoute,
+            eligibleTrainCountsByFeed: eligibleTrainCountsByFeed,
+            placedTrainCountsByFeed: placedTrainCountsByFeed,
+            unplacedTrainCountsByFeed: unplacedTrainCountsByFeed,
+            expiredTrainCountsByFeed: expiredTrainCountsByFeed,
+            expiredObservationCount: expiredEntries.count
+        )
         return currentPlans
     }
 
@@ -550,6 +672,7 @@ public struct TrainObservationCache: Sendable {
     }
 
     private var entriesByFeedID: [String: [TrainRunID: Entry]] = [:]
+    private var recentlyExpiredEntriesByID: [TrainRunID: Entry] = [:]
 
     public init() {}
 
@@ -584,12 +707,21 @@ public struct TrainObservationCache: Sendable {
             })
         }
 
+        for entries in entriesByFeedID.values {
+            for (id, entry) in entries where date.timeIntervalSince(entry.lastValidAt) >= 90 {
+                recentlyExpiredEntriesByID[id] = entry
+            }
+        }
         for feedID in entriesByFeedID.keys {
             entriesByFeedID[feedID] = entriesByFeedID[feedID]?.filter {
                 date.timeIntervalSince($0.value.lastValidAt) < 90
             }
         }
         entriesByFeedID = entriesByFeedID.filter { !$0.value.isEmpty }
+        let activeIDs = Set(entriesByFeedID.values.flatMap(\.keys))
+        recentlyExpiredEntriesByID = recentlyExpiredEntriesByID.filter { id, entry in
+            !activeIDs.contains(id) && date.timeIntervalSince(entry.lastValidAt) < 180
+        }
         return entries(at: date)
     }
 
@@ -603,5 +735,18 @@ public struct TrainObservationCache: Sendable {
                 }
                 return $0.observation.id.tripID < $1.observation.id.tripID
             }
+    }
+
+    public func coverageEntries(at date: Date) -> [Entry] {
+        (entries(at: date) + recentlyExpiredEntriesByID.values.filter {
+            let age = date.timeIntervalSince($0.lastValidAt)
+            return age >= 90 && age < 180
+        })
+        .sorted {
+            if $0.observation.routeID != $1.observation.routeID {
+                return $0.observation.routeID < $1.observation.routeID
+            }
+            return $0.observation.id.tripID < $1.observation.id.tripID
+        }
     }
 }
