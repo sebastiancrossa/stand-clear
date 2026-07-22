@@ -28,5 +28,12 @@ struct StandClearApp: App {
             .accessibilityLabel(model.menuBarPresentation.accessibilityLabel)
         }
         .menuBarExtraStyle(.window)
+
+        Window("Live Map", id: "live-map") {
+            LiveMapWindowView()
+                .environmentObject(model)
+        }
+        .defaultSize(width: 1_100, height: 760)
+        .windowResizability(.contentMinSize)
     }
 }

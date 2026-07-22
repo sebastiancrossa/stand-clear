@@ -4,6 +4,25 @@ import CoreLocation
 import Foundation
 import StandClearCore
 
+protocol SystemFeedFetching {
+    func fetchSystemSnapshot(
+        catalog: StationCatalog,
+        now: Date
+    ) async throws -> SystemFeedSnapshot
+}
+
+extension MTAClient: SystemFeedFetching {}
+
+protocol TrackGeometryLoading: Sendable {
+    func load() throws -> TrackGeometryCatalog
+}
+
+struct BundledTrackGeometryLoader: TrackGeometryLoading {
+    func load() throws -> TrackGeometryCatalog {
+        try TrackGeometryCatalog.bundled()
+    }
+}
+
 struct PinnedService: Equatable {
     let routeID: String
     let direction: TravelDirection
@@ -104,15 +123,24 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedDirections: Set<TravelDirection>
     @Published private(set) var pinnedService: PinnedService?
     @Published private(set) var showsMinutesAndSeconds = false
+    @Published private(set) var mapGeometry: TrackGeometryCatalog?
+    @Published private(set) var mapMotionPlans: [TrainMotionPlan] = []
+    @Published private(set) var mapFeedStatuses: [RealtimeFeedStatus] = []
+    @Published private(set) var mapLatestFeedTimestamp: Date?
+    @Published private(set) var isMapGeometryLoading = false
+    @Published private(set) var mapGeometryError: String?
 
     let locationService = LocationService()
 
-    private let client: MTAClient
+    private let client: any SystemFeedFetching
     private let catalog: StationCatalog?
     private let defaults: UserDefaults
+    private let geometryLoader: any TrackGeometryLoading
     private var cancellables: Set<AnyCancellable> = []
     private var hasStarted = false
     private var lastRefreshAttempt: Date?
+    private var trainObservationCache = TrainObservationCache()
+    private var trainProjectionEngine: TrainProjectionEngine?
 
     private enum DefaultsKey {
         static let selectedRoutes = "selectedRoutes"
@@ -125,9 +153,14 @@ final class AppModel: ObservableObject {
 
     private static let currentSelectionOnboardingVersion = 1
 
-    init(client: MTAClient = MTAClient(), defaults: UserDefaults = .standard) {
+    init(
+        client: any SystemFeedFetching = MTAClient(),
+        defaults: UserDefaults = .standard,
+        geometryLoader: any TrackGeometryLoading = BundledTrackGeometryLoader()
+    ) {
         self.client = client
         self.defaults = defaults
+        self.geometryLoader = geometryLoader
         let needsSelectionOnboarding = defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
             < Self.currentSelectionOnboardingVersion
 
@@ -229,19 +262,67 @@ final class AppModel: ObservableObject {
         guard !isRefreshing, let catalog else { return }
         locationService.requestLocation()
         isRefreshing = true
-        lastRefreshAttempt = Date()
+        let refreshDate = Date()
+        lastRefreshAttempt = refreshDate
         defer { isRefreshing = false }
 
         do {
-            let snapshot = try await client.fetchArrivals(catalog: catalog)
-            allArrivals = ArrivalCache.merging(previous: allArrivals, snapshot: snapshot)
+            let snapshot = try await client.fetchSystemSnapshot(catalog: catalog, now: refreshDate)
+            let arrivalSnapshot = FeedSnapshot(
+                arrivals: snapshot.arrivals,
+                fetchedAt: snapshot.fetchedAt,
+                failedFeedCount: snapshot.failedFeedCount,
+                failedRouteIDs: snapshot.failedRouteIDs
+            )
+            allArrivals = ArrivalCache.merging(previous: allArrivals, snapshot: arrivalSnapshot)
             lastUpdated = snapshot.fetchedAt
             feedWarning = snapshot.failedFeedCount == 0
                 ? nil
                 : "\(snapshot.failedFeedCount) MTA feed\(snapshot.failedFeedCount == 1 ? "" : "s") did not respond."
+            mapFeedStatuses = snapshot.feedStatuses
+            if let latestFeedTimestamp = snapshot.latestFeedTimestamp {
+                mapLatestFeedTimestamp = latestFeedTimestamp
+            }
+            let entries = trainObservationCache.merge(snapshot, at: refreshDate)
+            updateMapMotionPlans(entries: entries, at: refreshDate)
             updateAvailableRoutes()
         } catch {
             feedWarning = error.localizedDescription
+            mapFeedStatuses = mapFeedStatuses.map { status in
+                RealtimeFeedStatus(
+                    feedID: status.feedID,
+                    routeIDs: status.routeIDs,
+                    state: .failed,
+                    feedTimestamp: status.feedTimestamp,
+                    deletedEntityIDs: status.deletedEntityIDs
+                )
+            }
+            updateMapMotionPlans(
+                entries: trainObservationCache.entries(at: refreshDate),
+                at: refreshDate
+            )
+        }
+    }
+
+    func loadMapGeometry() async {
+        guard mapGeometry == nil, !isMapGeometryLoading else { return }
+        isMapGeometryLoading = true
+        mapGeometryError = nil
+        let loader = geometryLoader
+        defer { isMapGeometryLoading = false }
+
+        do {
+            let geometry = try await Task.detached(priority: .userInitiated) {
+                try loader.load()
+            }.value
+            mapGeometry = geometry
+            trainProjectionEngine = TrainProjectionEngine(catalog: geometry)
+            updateMapMotionPlans(
+                entries: trainObservationCache.entries(at: now),
+                at: now
+            )
+        } catch {
+            mapGeometryError = error.localizedDescription
         }
     }
 
@@ -335,6 +416,15 @@ final class AppModel: ObservableObject {
 
     private func updateAvailableRoutes() {
         availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
+    }
+
+    private func updateMapMotionPlans(
+        entries: [TrainObservationCache.Entry],
+        at date: Date
+    ) {
+        guard var engine = trainProjectionEngine else { return }
+        mapMotionPlans = engine.update(entries: entries, at: date)
+        trainProjectionEngine = engine
     }
 
     private func persistSelection() {
