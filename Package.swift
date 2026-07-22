@@ -12,6 +12,12 @@ let package = Package(
         .library(name: "StandClearCore", targets: ["StandClearCore"]),
         .executable(name: "StandClearStaticDataBuilder", targets: ["StandClearStaticDataBuilder"]),
     ],
+    dependencies: [
+        .package(
+            url: "https://github.com/apple/swift-protobuf.git",
+            exact: "1.32.0"
+        ),
+    ],
     targets: [
         .target(
             name: "StandClearStaticDataCompiler",
@@ -25,6 +31,9 @@ let package = Package(
         ),
         .target(
             name: "StandClearCore",
+            dependencies: [
+                .product(name: "SwiftProtobuf", package: "swift-protobuf"),
+            ],
             resources: [.process("Resources")],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

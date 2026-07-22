@@ -1,210 +1,191 @@
 import Foundation
 
-enum ProtobufError: Error {
-    case malformedVarint
-    case truncatedMessage
-    case unsupportedWireType(Int)
+struct ParsedRealtimeFeed: Sendable {
+    let timestamp: Date?
+    let entities: [ParsedRealtimeEntity]
+
+    var tripUpdates: [RealtimeTrip] {
+        entities.compactMap { entity in
+            entity.isDeleted ? nil : entity.tripUpdate
+        }
+    }
 }
 
-private struct ProtobufReader {
-    private let bytes: [UInt8]
-    private var index = 0
-
-    init(data: Data) {
-        bytes = Array(data)
-    }
-
-    init(bytes: [UInt8]) {
-        self.bytes = bytes
-    }
-
-    var isAtEnd: Bool { index >= bytes.count }
-
-    mutating func readKey() throws -> (field: Int, wire: Int) {
-        let key = try readVarint()
-        return (Int(key >> 3), Int(key & 0x07))
-    }
-
-    mutating func readVarint() throws -> UInt64 {
-        var result: UInt64 = 0
-        var shift: UInt64 = 0
-        while index < bytes.count, shift < 64 {
-            let byte = bytes[index]
-            index += 1
-            result |= UInt64(byte & 0x7f) << shift
-            if byte & 0x80 == 0 {
-                return result
-            }
-            shift += 7
-        }
-        throw ProtobufError.malformedVarint
-    }
-
-    mutating func readLengthDelimited() throws -> [UInt8] {
-        let length = Int(try readVarint())
-        guard length >= 0, index + length <= bytes.count else {
-            throw ProtobufError.truncatedMessage
-        }
-        let value = Array(bytes[index ..< index + length])
-        index += length
-        return value
-    }
-
-    mutating func readString() throws -> String {
-        String(decoding: try readLengthDelimited(), as: UTF8.self)
-    }
-
-    mutating func skip(wire: Int) throws {
-        switch wire {
-        case 0:
-            _ = try readVarint()
-        case 1:
-            try advance(by: 8)
-        case 2:
-            _ = try readLengthDelimited()
-        case 5:
-            try advance(by: 4)
-        default:
-            throw ProtobufError.unsupportedWireType(wire)
-        }
-    }
-
-    private mutating func advance(by count: Int) throws {
-        guard index + count <= bytes.count else {
-            throw ProtobufError.truncatedMessage
-        }
-        index += count
-    }
+struct ParsedRealtimeEntity: Sendable {
+    let id: String
+    let isDeleted: Bool
+    let tripUpdate: RealtimeTrip?
+    let vehiclePosition: RealtimeVehiclePosition?
 }
 
 struct RealtimeStopEvent: Sendable {
     let stopID: String
-    let time: Date?
+    let stopSequence: Int?
+    let arrivalTime: Date?
+    let departureTime: Date?
     let isSkipped: Bool
+    let scheduledTrack: String?
+    let actualTrack: String?
+
+    var time: Date? { arrivalTime ?? departureTime }
 }
 
 struct RealtimeTrip: Sendable {
     let tripID: String
     let routeID: String
+    let startDate: String
+    let startTime: String
     let directionID: Int?
+    let nyctTrainID: String?
+    let isAssigned: Bool?
+    let nyctDirection: TravelDirection?
+    let timestamp: Date?
     let stops: [RealtimeStopEvent]
 }
 
+struct RealtimeVehiclePosition: Sendable {
+    enum Status: Sendable {
+        case incomingAt
+        case stoppedAt
+        case inTransitTo
+    }
+
+    let tripID: String
+    let routeID: String
+    let startDate: String
+    let startTime: String
+    let directionID: Int?
+    let nyctTrainID: String?
+    let isAssigned: Bool?
+    let nyctDirection: TravelDirection?
+    let stopID: String?
+    let stopSequence: Int?
+    let status: Status?
+    let timestamp: Date?
+}
+
 public enum GTFSRealtimeParser {
-    static func parse(data: Data) throws -> [RealtimeTrip] {
-        var reader = ProtobufReader(data: data)
-        var trips: [RealtimeTrip] = []
+    static func parse(data: Data) throws -> ParsedRealtimeFeed {
+        let feed = try TransitRealtime_FeedMessage(
+            serializedBytes: data,
+            extensions: TransitRealtime_Gtfs_u45Realtime_u45Nyct_Extensions
+        )
 
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            if key.field == 2, key.wire == 2 {
-                if let trip = try parseEntity(bytes: reader.readLengthDelimited()) {
-                    trips.append(trip)
-                }
-            } else {
-                try reader.skip(wire: key.wire)
-            }
-        }
-        return trips
-    }
-
-    private static func parseEntity(bytes: [UInt8]) throws -> RealtimeTrip? {
-        var reader = ProtobufReader(bytes: bytes)
-        var isDeleted = false
-        var trip: RealtimeTrip?
-
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            switch (key.field, key.wire) {
-            case (2, 0): isDeleted = try reader.readVarint() != 0
-            case (3, 2): trip = try parseTripUpdate(bytes: reader.readLengthDelimited())
-            default: try reader.skip(wire: key.wire)
-            }
-        }
-        return isDeleted ? nil : trip
-    }
-
-    private static func parseTripUpdate(bytes: [UInt8]) throws -> RealtimeTrip? {
-        var reader = ProtobufReader(bytes: bytes)
-        var tripID = ""
-        var routeID = ""
-        var directionID: Int?
-        var stops: [RealtimeStopEvent] = []
-
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            switch (key.field, key.wire) {
-            case (1, 2):
-                (tripID, routeID, directionID) = try parseTripDescriptor(bytes: reader.readLengthDelimited())
-            case (2, 2):
-                if let stop = try parseStopTimeUpdate(bytes: reader.readLengthDelimited()) {
-                    stops.append(stop)
-                }
-            default:
-                try reader.skip(wire: key.wire)
-            }
-        }
-
-        guard !routeID.isEmpty, !stops.isEmpty else { return nil }
-        return RealtimeTrip(tripID: tripID, routeID: routeID, directionID: directionID, stops: stops)
-    }
-
-    private static func parseTripDescriptor(bytes: [UInt8]) throws -> (String, String, Int?) {
-        var reader = ProtobufReader(bytes: bytes)
-        var tripID = ""
-        var routeID = ""
-        var directionID: Int?
-
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            switch (key.field, key.wire) {
-            case (1, 2): tripID = try reader.readString()
-            case (5, 2): routeID = try reader.readString()
-            case (6, 0): directionID = Int(try reader.readVarint())
-            default: try reader.skip(wire: key.wire)
-            }
-        }
-        return (tripID, routeID, directionID)
-    }
-
-    private static func parseStopTimeUpdate(bytes: [UInt8]) throws -> RealtimeStopEvent? {
-        var reader = ProtobufReader(bytes: bytes)
-        var stopID = ""
-        var arrivalTime: Date?
-        var departureTime: Date?
-        var scheduleRelationship = 0
-
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            switch (key.field, key.wire) {
-            case (2, 2): arrivalTime = try parseStopTimeEvent(bytes: reader.readLengthDelimited())
-            case (3, 2): departureTime = try parseStopTimeEvent(bytes: reader.readLengthDelimited())
-            case (4, 2): stopID = try reader.readString()
-            case (5, 0): scheduleRelationship = Int(try reader.readVarint())
-            default: try reader.skip(wire: key.wire)
-            }
-        }
-
-        guard !stopID.isEmpty else { return nil }
-        return RealtimeStopEvent(
-            stopID: stopID,
-            time: arrivalTime ?? departureTime,
-            isSkipped: scheduleRelationship == 1
+        return ParsedRealtimeFeed(
+            timestamp: feed.header.hasTimestamp
+                ? Date(timeIntervalSince1970: TimeInterval(feed.header.timestamp))
+                : nil,
+            entities: feed.entity.map(parseEntity)
         )
     }
 
-    private static func parseStopTimeEvent(bytes: [UInt8]) throws -> Date? {
-        var reader = ProtobufReader(bytes: bytes)
-        var timestamp: UInt64?
+    private static func parseEntity(_ entity: TransitRealtime_FeedEntity) -> ParsedRealtimeEntity {
+        ParsedRealtimeEntity(
+            id: entity.id,
+            isDeleted: entity.isDeleted,
+            tripUpdate: entity.hasTripUpdate ? parseTripUpdate(entity.tripUpdate) : nil,
+            vehiclePosition: entity.hasVehicle ? parseVehiclePosition(entity.vehicle) : nil
+        )
+    }
 
-        while !reader.isAtEnd {
-            let key = try reader.readKey()
-            if key.field == 2, key.wire == 0 {
-                timestamp = try reader.readVarint()
-            } else {
-                try reader.skip(wire: key.wire)
+    private static func parseTripUpdate(_ update: TransitRealtime_TripUpdate) -> RealtimeTrip? {
+        let descriptor = update.trip
+        guard !descriptor.routeID.isEmpty else { return nil }
+
+        return RealtimeTrip(
+            tripID: descriptor.tripID,
+            routeID: descriptor.routeID,
+            startDate: descriptor.startDate,
+            startTime: descriptor.startTime,
+            directionID: descriptor.hasDirectionID ? Int(descriptor.directionID) : nil,
+            nyctTrainID: nyctDescriptor(for: descriptor)?.trainID,
+            isAssigned: nyctDescriptor(for: descriptor)?.isAssigned,
+            nyctDirection: nyctDirection(for: descriptor),
+            timestamp: update.hasTimestamp
+                ? Date(timeIntervalSince1970: TimeInterval(update.timestamp))
+                : nil,
+            stops: update.stopTimeUpdate.compactMap(parseStopTimeUpdate)
+        )
+    }
+
+    private static func parseStopTimeUpdate(
+        _ update: TransitRealtime_TripUpdate.StopTimeUpdate
+    ) -> RealtimeStopEvent? {
+        guard !update.stopID.isEmpty else { return nil }
+
+        let arrival = update.hasArrival && update.arrival.hasTime
+            ? Date(timeIntervalSince1970: TimeInterval(update.arrival.time))
+            : nil
+        let departure = update.hasDeparture && update.departure.hasTime
+            ? Date(timeIntervalSince1970: TimeInterval(update.departure.time))
+            : nil
+        let tracks = update.hasTransitRealtime_nyctStopTimeUpdate
+            ? update.TransitRealtime_nyctStopTimeUpdate
+            : nil
+
+        return RealtimeStopEvent(
+            stopID: update.stopID,
+            stopSequence: update.hasStopSequence ? Int(update.stopSequence) : nil,
+            arrivalTime: arrival,
+            departureTime: departure,
+            isSkipped: update.scheduleRelationship == .skipped,
+            scheduledTrack: tracks?.hasScheduledTrack == true ? tracks?.scheduledTrack : nil,
+            actualTrack: tracks?.hasActualTrack == true ? tracks?.actualTrack : nil
+        )
+    }
+
+    private static func parseVehiclePosition(
+        _ position: TransitRealtime_VehiclePosition
+    ) -> RealtimeVehiclePosition? {
+        guard position.hasTrip else { return nil }
+        let descriptor = position.trip
+        guard !descriptor.tripID.isEmpty else { return nil }
+
+        let status: RealtimeVehiclePosition.Status?
+        if position.hasCurrentStatus {
+            status = switch position.currentStatus {
+            case .incomingAt: .incomingAt
+            case .stoppedAt: .stoppedAt
+            case .inTransitTo: .inTransitTo
             }
+        } else {
+            status = nil
         }
-        return timestamp.map { Date(timeIntervalSince1970: TimeInterval($0)) }
+
+        return RealtimeVehiclePosition(
+            tripID: descriptor.tripID,
+            routeID: descriptor.routeID,
+            startDate: descriptor.startDate,
+            startTime: descriptor.startTime,
+            directionID: descriptor.hasDirectionID ? Int(descriptor.directionID) : nil,
+            nyctTrainID: nyctDescriptor(for: descriptor)?.trainID,
+            isAssigned: nyctDescriptor(for: descriptor)?.isAssigned,
+            nyctDirection: nyctDirection(for: descriptor),
+            stopID: position.hasStopID ? position.stopID : nil,
+            stopSequence: position.hasCurrentStopSequence ? Int(position.currentStopSequence) : nil,
+            status: status,
+            timestamp: position.hasTimestamp
+                ? Date(timeIntervalSince1970: TimeInterval(position.timestamp))
+                : nil
+        )
+    }
+
+    private static func nyctDescriptor(
+        for descriptor: TransitRealtime_TripDescriptor
+    ) -> TransitRealtime_NyctTripDescriptor? {
+        descriptor.hasTransitRealtime_nyctTripDescriptor
+            ? descriptor.TransitRealtime_nyctTripDescriptor
+            : nil
+    }
+
+    private static func nyctDirection(
+        for descriptor: TransitRealtime_TripDescriptor
+    ) -> TravelDirection? {
+        guard let nyct = nyctDescriptor(for: descriptor), nyct.hasDirection else { return nil }
+        return switch nyct.direction {
+        case .north: .northbound
+        case .south: .southbound
+        case .east, .west: .unknown
+        }
     }
 }
