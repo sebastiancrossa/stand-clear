@@ -6,22 +6,18 @@ struct RouteStyle {
     let foreground: Color
 
     static func style(for routeID: String) -> RouteStyle {
-        switch RouteID.baseLine(routeID) {
-        case "A", "C", "E": RouteStyle(background: Color(hex: 0x0039A6), foreground: .white)
-        case "B", "D", "F", "M": RouteStyle(background: Color(hex: 0xFF6319), foreground: .white)
-        case "G": RouteStyle(background: Color(hex: 0x6CBE45), foreground: .white)
-        case "J", "Z": RouteStyle(background: Color(hex: 0x996633), foreground: .white)
-        case "N", "Q", "R", "W": RouteStyle(background: Color(hex: 0xFCCC0A), foreground: .black)
-        case "1", "2", "3": RouteStyle(background: Color(hex: 0xEE352E), foreground: .white)
-        case "4", "5", "6": RouteStyle(background: Color(hex: 0x00933C), foreground: .white)
-        case "7": RouteStyle(background: Color(hex: 0xB933AD), foreground: .white)
-        case "SI": RouteStyle(background: Color(hex: 0x0039A6), foreground: .white)
-        default: RouteStyle(background: Color(hex: 0x808183), foreground: .white)
-        }
+        RouteStyle(
+            background: Color(hexString: RouteColor.backgroundHex(for: routeID)),
+            foreground: Color(hexString: RouteColor.textHex(for: routeID))
+        )
     }
 }
 
 extension Color {
+    init(hexString: String) {
+        self.init(hex: UInt32(hexString, radix: 16) ?? 0x808183)
+    }
+
     init(hex: UInt32) {
         self.init(
             .sRGB,
