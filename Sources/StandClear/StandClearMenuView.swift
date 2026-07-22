@@ -5,6 +5,7 @@ import SwiftUI
 struct StandClearMenuView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.openWindow) private var openWindow
+    let mapWindowCoordinator: LiveMapWindowCoordinator
 
     var body: some View {
         ZStack {
@@ -122,7 +123,9 @@ struct StandClearMenuView: View {
             Spacer()
 
             Button {
-                openWindow(id: "live-map")
+                mapWindowCoordinator.present {
+                    openWindow(id: "live-map")
+                }
             } label: {
                 Image(systemName: "map")
             }
