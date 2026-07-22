@@ -3,16 +3,18 @@ import SwiftUI
 @main
 struct StandClearApp: App {
     @StateObject private var model: AppModel
+    private let mapWindowCoordinator: LiveMapWindowCoordinator
 
     init() {
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
+        mapWindowCoordinator = LiveMapWindowCoordinator()
         Task { @MainActor in model.start() }
     }
 
     var body: some Scene {
         MenuBarExtra {
-            StandClearMenuView()
+            StandClearMenuView(mapWindowCoordinator: mapWindowCoordinator)
                 .environmentObject(model)
         } label: {
             Group {
@@ -32,6 +34,11 @@ struct StandClearApp: App {
         Window("Live Map", id: "live-map") {
             LiveMapWindowView()
                 .environmentObject(model)
+                .background {
+                    LiveMapWindowReader { window in
+                        mapWindowCoordinator.register(window)
+                    }
+                }
         }
         .defaultSize(width: 1_100, height: 760)
         .windowResizability(.contentMinSize)
