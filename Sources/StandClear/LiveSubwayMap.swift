@@ -22,7 +22,7 @@ struct LiveSubwayMap: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> MKMapView {
-        let mapView = MKMapView(frame: .zero)
+        let mapView = LiveMapKitView(frame: .zero)
         let configuration = MKStandardMapConfiguration(
             elevationStyle: .flat,
             emphasisStyle: .muted
@@ -71,7 +71,11 @@ struct LiveSubwayMap: NSViewRepresentable {
 
         private weak var mapView: MKMapView?
         private var displayLink: CADisplayLink?
+        private var windowVisibilityObservers: [NSKeyValueObservation] = []
+        private var windowCloseObserver: NSObjectProtocol?
         private var motionPlans: [TrainMotionPlan] = []
+        private var motionPlanRevision = LiveMapMotionRevision(plans: [])
+        private var reducedMotionRenderDate: Date?
         private var selectedRoutes: Set<String> = []
         private var selectedTrainID: TrainRunID?
         private var snapshots: [TrainRenderSnapshot] = []
@@ -98,9 +102,11 @@ struct LiveSubwayMap: NSViewRepresentable {
         ) {
             self.mapView = mapView
             self.motionPlans = motionPlans
+            motionPlanRevision = LiveMapMotionRevision(plans: motionPlans)
             self.selectedRoutes = selectedRoutes
             self.selectedTrainID = selectedTrainID
             self.reduceMotion = reduceMotion
+            reducedMotionRenderDate = reduceMotion ? now : nil
 
             let trackOverlay = TrackNetworkOverlay(catalog: geometry)
             let trainOverlay = TrainNetworkOverlay()
@@ -118,9 +124,10 @@ struct LiveSubwayMap: NSViewRepresentable {
                 maximum: 30,
                 preferred: 30
             )
-            displayLink.isPaused = reduceMotion
             displayLink.add(to: .main, forMode: .common)
             self.displayLink = displayLink
+            observeMapWindow(for: mapView)
+            updateDisplayLinkState(renderWhenResumed: false)
 
             updateUserLocation(userLocation)
             render(at: now)
@@ -139,11 +146,26 @@ struct LiveSubwayMap: NSViewRepresentable {
             reduceMotion: Bool,
             now: Date
         ) {
+            let newRevision = LiveMapMotionRevision(plans: motionPlans)
+            let didReceiveNewPlans = newRevision != motionPlanRevision
+            let didEnableReduceMotion = reduceMotion && !self.reduceMotion
             self.motionPlans = motionPlans
+            motionPlanRevision = newRevision
             self.selectedRoutes = selectedRoutes
             self.selectedTrainID = selectedTrainID
             self.reduceMotion = reduceMotion
-            displayLink?.isPaused = reduceMotion
+            if reduceMotion {
+                if LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
+                    didReceiveNewPlans: didReceiveNewPlans,
+                    didEnableReduceMotion: didEnableReduceMotion,
+                    hasFrozenSnapshot: reducedMotionRenderDate != nil
+                ) {
+                    reducedMotionRenderDate = now
+                }
+            } else {
+                reducedMotionRenderDate = nil
+            }
+            updateDisplayLinkState()
             trackRenderer?.selectedRoutes = selectedRoutes
             updateUserLocation(userLocation)
             render(at: now)
@@ -155,8 +177,10 @@ struct LiveSubwayMap: NSViewRepresentable {
         }
 
         func detach(from mapView: MKMapView) {
+            removeWindowObservers()
             displayLink?.invalidate()
             displayLink = nil
+            self.mapView = nil
             mapView.delegate = nil
         }
 
@@ -202,8 +226,25 @@ struct LiveSubwayMap: NSViewRepresentable {
         }
 
         @objc private func displayLinkDidFire(_ displayLink: CADisplayLink) {
-            guard !reduceMotion, mapView?.window?.isVisible == true else { return }
+            guard LiveMapAnimationPolicy.shouldRunDisplayLink(
+                reduceMotion: reduceMotion,
+                isWindowVisible: isMapWindowVisible
+            ) else { return }
             render(at: Date())
+        }
+
+        private func mapViewDidMoveToWindow() {
+            guard let mapView else { return }
+            observeMapWindow(for: mapView)
+            updateDisplayLinkState()
+        }
+
+        private func mapWindowVisibilityDidChange() {
+            updateDisplayLinkState()
+        }
+
+        private func mapWindowWillClose() {
+            displayLink?.isPaused = true
         }
 
         @objc private func didClickMap(_ recognizer: NSClickGestureRecognizer) {
@@ -222,11 +263,12 @@ struct LiveSubwayMap: NSViewRepresentable {
 
         private func render(at date: Date) {
             guard let mapView else { return }
+            let renderDate = reduceMotion ? (reducedMotionRenderDate ?? date) : date
             let mapRect = mapView.visibleMapRect
             let bounds = GeographicBounds(mapRect: mapRect)
             let rendered = motionPlans.lazy
                 .filter { self.selectedRoutes.contains($0.routeID) }
-                .compactMap { $0.render(at: date) }
+                .compactMap { $0.render(at: renderDate) }
             let nextSnapshots = LiveMapPresentation.visibleSnapshots(
                 Array(rendered),
                 selectedRoutes: selectedRoutes,
@@ -269,6 +311,105 @@ struct LiveSubwayMap: NSViewRepresentable {
             userLocationAnnotation = annotation
             mapView.addAnnotation(annotation)
         }
+
+        private var isMapWindowVisible: Bool {
+            guard let window = mapView?.window else { return false }
+            return window.isVisible
+                && !window.isMiniaturized
+                && window.occlusionState.contains(.visible)
+        }
+
+        private func observeMapWindow(for mapView: MKMapView) {
+            removeWindowObservers()
+            if let mapView = mapView as? LiveMapKitView {
+                mapView.onWindowChange = { [weak self] in
+                    self?.mapViewDidMoveToWindow()
+                }
+            }
+            guard let window = mapView.window else { return }
+            let visibilityDidChange: @MainActor () -> Void = { [weak self] in
+                self?.mapWindowVisibilityDidChange()
+            }
+            windowVisibilityObservers = [
+                window.observe(\.isVisible) { _, _ in Task { @MainActor in visibilityDidChange() } },
+                window.observe(\.isMiniaturized) { _, _ in Task { @MainActor in visibilityDidChange() } },
+                window.observe(\.occlusionState) { _, _ in Task { @MainActor in visibilityDidChange() } },
+            ]
+            windowCloseObserver = NotificationCenter.default.addObserver(
+                forName: NSWindow.willCloseNotification,
+                object: window,
+                queue: .main
+            ) { _ in
+                Task { @MainActor [weak self] in self?.mapWindowWillClose() }
+            }
+        }
+
+        private func removeWindowObservers() {
+            windowVisibilityObservers.removeAll()
+            if let windowCloseObserver {
+                NotificationCenter.default.removeObserver(windowCloseObserver)
+                self.windowCloseObserver = nil
+            }
+        }
+
+        private func updateDisplayLinkState(renderWhenResumed: Bool = true) {
+            guard let displayLink else { return }
+            let shouldRun = LiveMapAnimationPolicy.shouldRunDisplayLink(
+                reduceMotion: reduceMotion,
+                isWindowVisible: isMapWindowVisible
+            )
+            let wasPaused = displayLink.isPaused
+            displayLink.isPaused = !shouldRun
+            if renderWhenResumed, shouldRun, wasPaused {
+                render(at: Date())
+            }
+        }
+    }
+}
+
+private final class LiveMapKitView: MKMapView {
+    var onWindowChange: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        onWindowChange?()
+    }
+}
+
+private struct LiveMapMotionRevision: Equatable {
+    private struct Entry: Equatable {
+        let id: TrainRunID
+        let direction: TravelDirection
+        let destination: String
+        let shapeID: String?
+        let nextStopID: String?
+        let nextArrivalTime: Date?
+        let confidence: TrainConfidence
+        let feedTimestamp: Date
+        let vehicleTimestamp: Date?
+    }
+
+    private let entries: [Entry]
+
+    init(plans: [TrainMotionPlan]) {
+        entries = plans.map {
+            Entry(
+                id: $0.id,
+                direction: $0.direction,
+                destination: $0.destination,
+                shapeID: $0.shapeID,
+                nextStopID: $0.nextStopID,
+                nextArrivalTime: $0.nextArrivalTime,
+                confidence: $0.confidence,
+                feedTimestamp: $0.feedTimestamp,
+                vehicleTimestamp: $0.vehicleTimestamp
+            )
+        }
+        .sorted { lhs, rhs in
+            if lhs.id.feedID != rhs.id.feedID { return lhs.id.feedID < rhs.id.feedID }
+            if lhs.id.tripID != rhs.id.tripID { return lhs.id.tripID < rhs.id.tripID }
+            return lhs.id.startTime < rhs.id.startTime
+        }
     }
 }
 
@@ -308,16 +449,16 @@ private final class TrackNetworkOverlay: NSObject, MKOverlay {
 
     init(catalog: TrackGeometryCatalog) {
         let corridors = catalog.resource.corridors.sorted { $0.id < $1.id }
-        let source: [(TrackPath, [String])] = corridors.compactMap { corridor in
-            guard let path = corridor.shapeIDs.compactMap({ catalog.path(shapeID: $0) }).first else { return nil }
-            return (path, RouteID.sorted(corridor.routeIDs))
+        let source: [([TrackPoint], [String])] = corridors.compactMap { corridor in
+            guard corridor.points.count >= 2 else { return nil }
+            return (corridor.points, RouteID.sorted(corridor.routeIDs))
         }
         let resolvedSource = source.isEmpty
-            ? catalog.resource.paths.map { ($0, RouteID.sorted($0.routeIDs)) }
+            ? catalog.resource.paths.map { ($0.points, RouteID.sorted($0.routeIDs)) }
             : source
 
-        lines = resolvedSource.compactMap { path, routeIDs in
-            let points = path.points.map {
+        lines = resolvedSource.compactMap { pathPoints, routeIDs in
+            let points = pathPoints.map {
                 MKMapPoint(CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude))
             }
             guard points.count >= 2 else { return nil }
@@ -330,10 +471,10 @@ private final class TrackNetworkOverlay: NSObject, MKOverlay {
         boundingMapRect = lines.reduce(MKMapRect.null) { $0.union($1.boundingMapRect) }
         coordinate = MKMapPoint(x: boundingMapRect.midX, y: boundingMapRect.midY).coordinate
         colorsByRouteID = Dictionary(uniqueKeysWithValues: catalog.resource.routes.map { route in
-            (route.id, NSColor(hexString: route.colorHex))
+            (route.id, NSColor(hexString: catalog.style(forRoute: route.id).backgroundHex))
         })
         textColorsByRouteID = Dictionary(uniqueKeysWithValues: catalog.resource.routes.map { route in
-            (route.id, NSColor(hexString: route.textColorHex))
+            (route.id, NSColor(hexString: catalog.style(forRoute: route.id).foregroundHex))
         })
     }
 
@@ -368,34 +509,47 @@ private final class TrackNetworkRenderer: MKOverlayRenderer {
                 index == 0 ? path.move(to: point) : path.addLine(to: point)
             }
 
+            let routeWidth: CGFloat = 3.5 * mapUnitsPerPoint
+            let routeSpacing: CGFloat = 4 * mapUnitsPerPoint
             context.addPath(path)
             context.setStrokeColor(NSColor.black.withAlphaComponent(0.78).cgColor)
-            context.setLineWidth(7 * mapUnitsPerPoint)
+            context.setLineWidth(max(7, 4 + CGFloat(routes.count) * 4) * mapUnitsPerPoint)
             context.setLineDash(phase: 0, lengths: [])
             context.strokePath()
 
             if routes.count == 1, let routeID = routes.first {
                 context.addPath(path)
                 context.setStrokeColor(color(for: routeID, network: network).cgColor)
-                context.setLineWidth(4 * mapUnitsPerPoint)
+                context.setLineWidth(routeWidth)
                 context.strokePath()
                 continue
             }
 
-            let dashLength: CGFloat = 9 * mapUnitsPerPoint
-            let offLength = dashLength * CGFloat(max(1, routes.count - 1))
             for (index, routeID) in routes.enumerated() {
-                context.addPath(path)
+                let offset = (CGFloat(index) - CGFloat(routes.count - 1) / 2) * routeSpacing
+                context.addPath(offsetPath(for: line.points, by: offset))
                 context.setStrokeColor(color(for: routeID, network: network).cgColor)
-                context.setLineWidth(4 * mapUnitsPerPoint)
-                context.setLineDash(
-                    phase: -CGFloat(index) * dashLength,
-                    lengths: [dashLength, offLength]
-                )
+                context.setLineWidth(routeWidth)
                 context.strokePath()
             }
-            context.setLineDash(phase: 0, lengths: [])
         }
+    }
+
+    private func offsetPath(for mapPoints: [MKMapPoint], by offset: CGFloat) -> CGPath {
+        let points = mapPoints.map(point(for:))
+        let path = CGMutablePath()
+        for (index, point) in points.enumerated() {
+            let previous = points[max(0, index - 1)]
+            let next = points[min(points.count - 1, index + 1)]
+            let delta = CGPoint(x: next.x - previous.x, y: next.y - previous.y)
+            let length = max(hypot(delta.x, delta.y), .leastNonzeroMagnitude)
+            let shifted = CGPoint(
+                x: point.x - delta.y / length * offset,
+                y: point.y + delta.x / length * offset
+            )
+            index == 0 ? path.move(to: shifted) : path.addLine(to: shifted)
+        }
+        return path
     }
 
     private func color(for routeID: String, network: TrackNetworkOverlay) -> NSColor {

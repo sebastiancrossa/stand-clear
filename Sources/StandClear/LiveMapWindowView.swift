@@ -204,13 +204,9 @@ struct LiveMapWindowView: View {
             HStack(spacing: 7) {
                 ForEach(RouteID.sorted(session.allRoutes), id: \.self) { routeID in
                     let selected = session.isRouteVisible(routeID)
-                    let metadata = geometry.route(routeID)
-                    let background = Color(
-                        hexString: metadata?.colorHex ?? RouteColor.backgroundHex(for: routeID)
-                    )
-                    let foreground = Color(
-                        hexString: metadata?.textColorHex ?? RouteColor.textHex(for: routeID)
-                    )
+                    let style = geometry.style(forRoute: routeID)
+                    let background = Color(hexString: style.backgroundHex)
+                    let foreground = Color(hexString: style.foregroundHex)
 
                     Button {
                         session.toggleRoute(routeID)
@@ -316,10 +312,10 @@ struct LiveMapWindowView: View {
     }
 
     private func routeBadge(_ routeID: String) -> some View {
-        let metadata = model.mapGeometry?.route(routeID)
+        let metadata = model.mapGeometry?.style(forRoute: routeID) ?? RouteStyle.metadata(for: routeID)
         let style = RouteStyle(
-            background: Color(hexString: metadata?.colorHex ?? RouteColor.backgroundHex(for: routeID)),
-            foreground: Color(hexString: metadata?.textColorHex ?? RouteColor.textHex(for: routeID))
+            background: Color(hexString: metadata.backgroundHex),
+            foreground: Color(hexString: metadata.foregroundHex)
         )
         return Text(RouteID.displayLabel(routeID))
             .font(.system(size: 18, weight: .bold, design: .rounded))

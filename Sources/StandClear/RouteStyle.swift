@@ -6,10 +6,15 @@ struct RouteStyle {
     let foreground: Color
 
     static func style(for routeID: String) -> RouteStyle {
-        RouteStyle(
-            background: Color(hexString: RouteColor.backgroundHex(for: routeID)),
-            foreground: Color(hexString: RouteColor.textHex(for: routeID))
+        let metadata = metadata(for: routeID)
+        return RouteStyle(
+            background: Color(hexString: metadata.backgroundHex),
+            foreground: Color(hexString: metadata.foregroundHex)
         )
+    }
+
+    static func metadata(for routeID: String) -> RouteStyleMetadata {
+        RouteStyleResolver.bundled.style(for: routeID)
     }
 }
 

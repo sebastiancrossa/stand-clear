@@ -57,6 +57,23 @@ enum LiveMapPresentation {
     }
 }
 
+enum LiveMapAnimationPolicy {
+    static func shouldRunDisplayLink(
+        reduceMotion: Bool,
+        isWindowVisible: Bool
+    ) -> Bool {
+        !reduceMotion && isWindowVisible
+    }
+
+    static func shouldAdvanceReducedMotionSnapshot(
+        didReceiveNewPlans: Bool,
+        didEnableReduceMotion: Bool,
+        hasFrozenSnapshot: Bool
+    ) -> Bool {
+        didReceiveNewPlans || didEnableReduceMotion || !hasFrozenSnapshot
+    }
+}
+
 struct LiveMapFeedPresentation: Equatable {
     enum State: Equatable {
         case waiting

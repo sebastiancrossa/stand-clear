@@ -78,6 +78,26 @@ final class StaticDataCompilerTests: XCTestCase {
         XCTAssertGreaterThan(path.points.last?.distanceMeters ?? 0, 1_000)
     }
 
+    func testCorridorsPreserveSharedMiddleStationSegmentAcrossDifferentShapes() throws {
+        let sharedInput = StaticGTFSInput(
+            routesCSV: input.routesCSV + "\n        B,MTA NYCT,B,Bravo Local,,1,,FF6319,FFFFFF,3",
+            tripsCSV: input.tripsCSV + "\n        B,trip-b,WKD,Bravo,1,B.shape",
+            stopTimesCSV: input.stopTimesCSV + "\n        trip-b,A0N,10:00:00,10:00:20,1\n        trip-b,A1N,10:02:00,10:02:20,2\n        trip-b,A2N,10:04:00,10:04:20,3\n        trip-b,B3N,10:06:00,10:06:20,4",
+            stopsCSV: input.stopsCSV + "\n        A0,Approach,39.990000,-74.010000,1,\n        A0N,Approach,39.990000,-74.010000,0,A0\n        B3,Branch,40.020000,-74.000000,1,\n        B3N,Branch,40.020000,-74.000000,0,B3",
+            transfersCSV: input.transfersCSV,
+            shapesCSV: input.shapesCSV + "\n        B.shape,0,39.990000,-74.010000\n        B.shape,1,40.000000,-74.000000\n        B.shape,2,40.005000,-74.005000\n        B.shape,3,40.010000,-74.010000\n        B.shape,4,40.020000,-74.000000",
+            feedInfoCSV: input.feedInfoCSV
+        )
+
+        let resource = try StaticGTFSCompiler().compile(sharedInput)
+        let sharedCorridor = try XCTUnwrap(resource.corridors.first { corridor in
+            corridor.routeIDs == ["A", "B"]
+        })
+        XCTAssertEqual(sharedCorridor.points.map(\.latitude), [40.0, 40.005, 40.01])
+        XCTAssertEqual(sharedCorridor.points.map(\.longitude), [-74.0, -74.005, -74.01])
+        XCTAssertEqual(Set(sharedCorridor.shapeIDs), Set(["A.shape", "B.shape"]))
+    }
+
     func testCompilerRejectsADeclaredRouteWithoutGeometry() {
         let broken = StaticGTFSInput(
             routesCSV: input.routesCSV + "\nQ,MTA NYCT,Q,Missing,,1,,FCCC0A,000000,3",

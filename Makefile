@@ -20,7 +20,7 @@ app:
 
 refresh-static-data:
 	mkdir -p .build/mta-static/input
-	curl -fsSL -o .build/mta-static/gtfs_subway.zip https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip
+	curl -fsSL --connect-timeout 15 --max-time 180 -o .build/mta-static/gtfs_subway.zip https://rrgtfsfeeds.s3.amazonaws.com/gtfs_subway.zip
 	unzip -jo .build/mta-static/gtfs_subway.zip routes.txt trips.txt stop_times.txt stops.txt transfers.txt shapes.txt feed_info.txt -d .build/mta-static/input
 	cp .build/mta-static/input/stops.txt .build/mta-static/input/transfers.txt Sources/StandClearCore/Resources/
 	awk -F, 'NR > 1 {print $$2 "," $$1}' .build/mta-static/input/trips.txt > .build/mta-static/trip_routes.csv

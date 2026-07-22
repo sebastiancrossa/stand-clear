@@ -43,6 +43,65 @@ public struct RouteGeometryMetadata: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+/// The colors and labels used to present a route. These values come from the
+/// static MTA feed when it is available and fall back to the legacy line
+/// palette only for unknown routes.
+public struct RouteStyleMetadata: Equatable, Hashable, Sendable {
+    public let backgroundHex: String
+    public let foregroundHex: String
+
+    public init(backgroundHex: String, foregroundHex: String) {
+        self.backgroundHex = backgroundHex.uppercased()
+        self.foregroundHex = foregroundHex.uppercased()
+    }
+}
+
+/// Resolves route presentation metadata without requiring callers to know
+/// whether it came from the MTA static feed or the legacy fallback palette.
+public struct RouteStyleResolver: Sendable {
+    private let stylesByRouteID: [String: RouteStyleMetadata]
+
+    public init(routes: [RouteGeometryMetadata]) {
+        stylesByRouteID = Dictionary(
+            uniqueKeysWithValues: routes.map { route in
+                (
+                    RouteID.normalized(route.id),
+                    RouteStyleMetadata(
+                        backgroundHex: route.colorHex,
+                        foregroundHex: route.textColorHex
+                    )
+                )
+            }
+        )
+    }
+
+    public init(catalog: TrackGeometryCatalog) {
+        self.init(routes: catalog.resource.routes)
+    }
+
+    /// Small route-only resource, decoded once for non-map UI such as arrival
+    /// badges. Keeping this separate preserves lazy loading of map geometry.
+    public static let bundled: RouteStyleResolver = {
+        let dataBundle = Bundle.standClearResources
+        guard
+            let url = dataBundle.url(forResource: "subway_route_styles", withExtension: "json"),
+            let data = try? Data(contentsOf: url),
+            let routes = try? JSONDecoder().decode([RouteGeometryMetadata].self, from: data)
+        else {
+            return RouteStyleResolver(routes: [])
+        }
+        return RouteStyleResolver(routes: routes)
+    }()
+
+    public func style(for routeID: String) -> RouteStyleMetadata {
+        stylesByRouteID[RouteID.normalized(routeID)]
+            ?? RouteStyleMetadata(
+                backgroundHex: RouteColor.backgroundHex(for: routeID),
+                foregroundHex: RouteColor.textHex(for: routeID)
+            )
+    }
+}
+
 public struct TrackPoint: Codable, Equatable, Hashable, Sendable {
     public let latitude: Double
     public let longitude: Double
@@ -127,15 +186,20 @@ public struct RenderCorridor: Codable, Equatable, Sendable {
     public let id: String
     public let shapeIDs: [String]
     public let routeIDs: [String]
+    /// The directed station-to-station geometry this corridor renders. Keeping
+    /// this separate from `TrackPath` lets shared sections be grouped even when
+    /// the complete trip shapes have different endpoints.
+    public let points: [TrackPoint]
 
-    public init(id: String, shapeIDs: [String], routeIDs: [String]) {
+    public init(id: String, shapeIDs: [String], routeIDs: [String], points: [TrackPoint] = []) {
         self.id = id
         self.shapeIDs = shapeIDs
         self.routeIDs = routeIDs
+        self.points = points
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id = "i", shapeIDs = "s", routeIDs = "r"
+        case id = "i", shapeIDs = "s", routeIDs = "r", points = "p"
     }
 }
 
@@ -152,7 +216,7 @@ public struct StationTransferGroup: Codable, Equatable, Sendable {
 }
 
 public struct SubwayGeometryResource: Codable, Equatable, Sendable {
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public let version: Int
     public let feedVersion: String?
@@ -194,6 +258,7 @@ public struct SubwayGeometryResource: Codable, Equatable, Sendable {
 public struct TrackGeometryCatalog: Sendable {
     public let resource: SubwayGeometryResource
     private let routesByID: [String: RouteGeometryMetadata]
+    private let routeStyleResolver: RouteStyleResolver
     private let pathsByShapeID: [String: TrackPath]
     private let pathsByRouteID: [String: [TrackPath]]
 
@@ -223,6 +288,7 @@ public struct TrackGeometryCatalog: Sendable {
         }
         resource = decoded
         routesByID = Dictionary(uniqueKeysWithValues: decoded.routes.map { ($0.id, $0) })
+        routeStyleResolver = RouteStyleResolver(routes: decoded.routes)
         pathsByShapeID = Dictionary(uniqueKeysWithValues: decoded.paths.map { ($0.shapeID, $0) })
         var grouped: [String: [TrackPath]] = [:]
         for path in decoded.paths {
@@ -243,6 +309,10 @@ public struct TrackGeometryCatalog: Sendable {
 
     public func route(_ routeID: String) -> RouteGeometryMetadata? {
         routesByID[RouteID.normalized(routeID)]
+    }
+
+    public func style(forRoute routeID: String) -> RouteStyleMetadata {
+        routeStyleResolver.style(for: routeID)
     }
 
     public func path(shapeID: String) -> TrackPath? {

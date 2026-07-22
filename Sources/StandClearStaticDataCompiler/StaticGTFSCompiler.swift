@@ -208,6 +208,12 @@ public struct StaticGTFSCompiler: Sendable {
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(resource)
     }
+
+    public static func encodeRouteStyles(_ resource: SubwayGeometryResource) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(resource.routes)
+    }
 }
 
 private extension StaticGTFSCompiler {
@@ -372,22 +378,42 @@ private extension StaticGTFSCompiler {
     }
 
     func makeCorridors(_ paths: [TrackPath]) -> [RenderCorridor] {
-        let grouped = Dictionary(grouping: paths) { path in
-            path.points.map {
-                QuantizedPoint(
-                    latitude: Int64(($0.latitude * 1_000_000).rounded()),
-                    longitude: Int64(($0.longitude * 1_000_000).rounded())
+        let segments: [CorridorSegment] = paths.flatMap { path in
+            zip(path.anchors, path.anchors.dropFirst()).compactMap { (start, end) in
+                guard start.pointIndex < end.pointIndex else { return nil }
+                let points = Array(path.points[start.pointIndex ... end.pointIndex])
+                guard points.count >= 2 else { return nil }
+                return CorridorSegment(
+                    shapeID: path.shapeID,
+                    routeIDs: path.routeIDs,
+                    startPointIndex: start.pointIndex,
+                    endPointIndex: end.pointIndex,
+                    points: points
                 )
             }
         }
+        let grouped = Dictionary(grouping: segments) { segment in
+            segment.points.map(quantizedPoint)
+        }
         return grouped.values.map { matches in
-            let shapeIDs = matches.map(\.shapeID).sorted()
+            let ordered = matches.sorted { lhs, rhs in
+                lhs.id < rhs.id
+            }
+            let shapeIDs = Set(matches.map(\.shapeID)).sorted()
             return RenderCorridor(
-                id: shapeIDs.joined(separator: "+"),
+                id: ordered.map(\.id).joined(separator: "+"),
                 shapeIDs: shapeIDs,
-                routeIDs: Set(matches.flatMap(\.routeIDs)).sorted()
+                routeIDs: Set(matches.flatMap(\.routeIDs)).sorted(),
+                points: ordered[0].points
             )
         }.sorted { $0.id < $1.id }
+    }
+
+    func quantizedPoint(_ point: TrackPoint) -> QuantizedPoint {
+        QuantizedPoint(
+            latitude: Int64((point.latitude * 1_000_000).rounded()),
+            longitude: Int64((point.longitude * 1_000_000).rounded())
+        )
     }
 
     func transferGroups(_ csv: String, stops: [String: Stop]) throws -> [StationTransferGroup] {
@@ -432,6 +458,16 @@ private struct StationPair: Hashable {
 private struct QuantizedPoint: Hashable {
     let latitude: Int64
     let longitude: Int64
+}
+
+private struct CorridorSegment {
+    let shapeID: String
+    let routeIDs: [String]
+    let startPointIndex: Int
+    let endPointIndex: Int
+    let points: [TrackPoint]
+
+    var id: String { "\(shapeID):\(startPointIndex)-\(endPointIndex)" }
 }
 
 private struct CSVTable {

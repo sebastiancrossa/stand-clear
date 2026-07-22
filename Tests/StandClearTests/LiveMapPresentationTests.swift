@@ -143,6 +143,49 @@ final class LiveMapPresentationTests: XCTestCase {
         XCTAssertEqual(Set(visible.map(\.id)).count, 300)
     }
 
+    func testAnimationPolicyRunsTheDisplayLinkOnlyForVisibleNonReducedMotionMaps() {
+        XCTAssertTrue(
+            LiveMapAnimationPolicy.shouldRunDisplayLink(reduceMotion: false, isWindowVisible: true)
+        )
+        XCTAssertFalse(
+            LiveMapAnimationPolicy.shouldRunDisplayLink(reduceMotion: true, isWindowVisible: true)
+        )
+        XCTAssertFalse(
+            LiveMapAnimationPolicy.shouldRunDisplayLink(reduceMotion: false, isWindowVisible: false)
+        )
+    }
+
+    func testAnimationPolicyFreezesReducedMotionPositionsUntilPlansChange() {
+        XCTAssertTrue(
+            LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
+                didReceiveNewPlans: false,
+                didEnableReduceMotion: false,
+                hasFrozenSnapshot: false
+            )
+        )
+        XCTAssertFalse(
+            LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
+                didReceiveNewPlans: false,
+                didEnableReduceMotion: false,
+                hasFrozenSnapshot: true
+            )
+        )
+        XCTAssertTrue(
+            LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
+                didReceiveNewPlans: true,
+                didEnableReduceMotion: false,
+                hasFrozenSnapshot: true
+            )
+        )
+        XCTAssertTrue(
+            LiveMapAnimationPolicy.shouldAdvanceReducedMotionSnapshot(
+                didReceiveNewPlans: false,
+                didEnableReduceMotion: true,
+                hasFrozenSnapshot: true
+            )
+        )
+    }
+
     private func makeSnapshot(
         index: Int,
         route: String,

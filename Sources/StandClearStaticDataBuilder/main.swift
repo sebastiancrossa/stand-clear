@@ -37,6 +37,10 @@ do {
     let resource = try StaticGTFSCompiler().compile(input)
     let data = try StaticGTFSCompiler.encode(resource)
     try data.write(to: outputURL, options: .atomic)
+    let routeStylesURL = outputURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("subway_route_styles.json")
+    try StaticGTFSCompiler.encodeRouteStyles(resource).write(to: routeStylesURL, options: .atomic)
     print("Compiled \(resource.paths.count) paths for \(resource.routes.count) routes (\(data.count) bytes).")
     for warning in resource.validationWarnings { print("warning: \(warning)") }
 } catch {
