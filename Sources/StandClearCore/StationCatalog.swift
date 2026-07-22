@@ -139,7 +139,7 @@ public struct StationCatalog: Sendable {
     }
 
     public static func bundled() throws -> StationCatalog {
-        let dataBundle = packagedResourceBundle() ?? Bundle.module
+        let dataBundle = Bundle.standClearResources
         guard let stopsURL = dataBundle.url(forResource: "stops", withExtension: "txt") else {
             throw StationCatalogError.missingBundledStops
         }
@@ -153,13 +153,6 @@ public struct StationCatalog: Sendable {
             csv: String(contentsOf: stopsURL, encoding: .utf8),
             stationRoutesCSV: String(contentsOf: routesURL, encoding: .utf8),
             transfersCSV: String(contentsOf: transfersURL, encoding: .utf8)
-        )
-    }
-
-    private static func packagedResourceBundle() -> Bundle? {
-        guard let resourcesURL = Bundle.main.resourceURL else { return nil }
-        return Bundle(
-            url: resourcesURL.appendingPathComponent("StandClear_StandClearCore.bundle", isDirectory: true)
         )
     }
 

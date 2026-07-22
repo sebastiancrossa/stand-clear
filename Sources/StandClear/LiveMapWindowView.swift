@@ -7,7 +7,7 @@ struct LiveMapWindowView: View {
     @StateObject private var session = LiveMapSession()
 
     var body: some View {
-        ZStack {
+        return ZStack {
             Color.black.ignoresSafeArea()
             content
         }
@@ -69,7 +69,11 @@ struct LiveMapWindowView: View {
     }
 
     private func liveMap(_ geometry: TrackGeometryCatalog) -> some View {
-        ZStack {
+        let snapshots = visibleSnapshots
+        let selectedSnapshot = session.selectedTrainID.flatMap { selectedID in
+            snapshots.first { $0.id == selectedID }
+        }
+        return ZStack {
             LiveSubwayMap(
                 geometry: geometry,
                 motionPlans: model.mapMotionPlans,
@@ -80,14 +84,14 @@ struct LiveMapWindowView: View {
                 reduceMotion: reduceMotion,
                 now: model.now
             ) { snapshot in
-                session.selectTrain(id: snapshot?.id, routeID: snapshot?.routeID)
+                session.selectTrain(id: snapshot?.id)
             }
             .ignoresSafeArea()
             .accessibilityLabel("Live NYC subway map")
             .accessibilityHint("Estimated train positions. Use the route controls and train menu to explore.")
 
             VStack(spacing: 10) {
-                mapToolbar(geometry)
+                mapToolbar(snapshots)
                 routeFilters(geometry)
                 Spacer(minLength: 12)
 
@@ -105,11 +109,11 @@ struct LiveMapWindowView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: session.selectedTrainID)
     }
 
-    private func mapToolbar(_ geometry: TrackGeometryCatalog) -> some View {
+    private func mapToolbar(_ snapshots: [TrainRenderSnapshot]) -> some View {
         HStack(spacing: 10) {
             feedStatus
             Spacer(minLength: 10)
-            trainPicker
+            trainPicker(snapshots)
             Button {
                 session.requestReset()
             } label: {
@@ -174,25 +178,25 @@ struct LiveMapWindowView: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var trainPicker: some View {
+    private func trainPicker(_ snapshots: [TrainRenderSnapshot]) -> some View {
         Menu {
-            if visibleSnapshots.isEmpty {
+            if snapshots.isEmpty {
                 Text("No visible trains")
             } else {
-                ForEach(visibleSnapshots) { snapshot in
+                ForEach(snapshots) { snapshot in
                     Button {
-                        session.selectTrain(id: snapshot.id, routeID: snapshot.routeID)
+                        session.selectTrain(id: snapshot.id)
                     } label: {
                         Text("\(RouteID.displayLabel(snapshot.routeID)) · \(destinationText(snapshot))")
                     }
                 }
             }
         } label: {
-            Label("\(visibleSnapshots.count) trains", systemImage: "tram.fill")
+            Label("\(snapshots.count) trains", systemImage: "tram.fill")
         }
         .menuStyle(.borderlessButton)
         .buttonStyle(MapToolbarButtonStyle())
-        .accessibilityLabel("Choose a train, \(visibleSnapshots.count) available")
+        .accessibilityLabel("Choose a train, \(snapshots.count) available")
     }
 
     private func routeFilters(_ geometry: TrackGeometryCatalog) -> some View {
@@ -335,11 +339,6 @@ struct LiveMapWindowView: View {
             }
     }
 
-    private var selectedSnapshot: TrainRenderSnapshot? {
-        guard let selectedTrainID = session.selectedTrainID else { return nil }
-        return visibleSnapshots.first { $0.id == selectedTrainID }
-    }
-
     private func synchronizeSession() {
         let routes = Set(model.mapGeometry?.resource.routes.map(\.id) ?? [])
         session.updateAllRoutes(routes)
@@ -347,12 +346,10 @@ struct LiveMapWindowView: View {
     }
 
     private func reconcileSelection(at date: Date) {
-        let trainRoutes = Dictionary(
-            uniqueKeysWithValues: model.mapMotionPlans.compactMap { plan in
-                plan.render(at: date).map { ($0.id, $0.routeID) }
-            }
-        )
-        session.reconcile(trainRoutes: trainRoutes)
+        let liveTrainIDs = Set(model.mapMotionPlans.lazy.filter {
+            $0.dataHealth(at: date) != .expired
+        }.map(\.id))
+        session.reconcile(trainIDs: liveTrainIDs)
     }
 
     private func destinationText(_ snapshot: TrainRenderSnapshot) -> String {

@@ -9,13 +9,16 @@ enum BuilderError: LocalizedError {
     }
 }
 
-func read(_ name: String, from directory: URL, required: Bool = true) throws -> String? {
-    let url = directory.appendingPathComponent(name)
-    guard FileManager.default.fileExists(atPath: url.path) else {
-        if required { throw CocoaError(.fileNoSuchFile) }
+func readRequired(_ name: String, from directory: URL) throws -> String {
+    try String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)
+}
+
+func readOptional(_ name: String, from directory: URL) throws -> String? {
+    do {
+        return try readRequired(name, from: directory)
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
         return nil
     }
-    return try String(contentsOf: url, encoding: .utf8)
 }
 
 do {
@@ -23,13 +26,13 @@ do {
     let inputDirectory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
     let outputURL = URL(fileURLWithPath: CommandLine.arguments[2])
     let input = try StaticGTFSInput(
-        routesCSV: read("routes.txt", from: inputDirectory)!,
-        tripsCSV: read("trips.txt", from: inputDirectory)!,
-        stopTimesCSV: read("stop_times.txt", from: inputDirectory)!,
-        stopsCSV: read("stops.txt", from: inputDirectory)!,
-        transfersCSV: read("transfers.txt", from: inputDirectory)!,
-        shapesCSV: read("shapes.txt", from: inputDirectory)!,
-        feedInfoCSV: read("feed_info.txt", from: inputDirectory, required: false)
+        routesCSV: readRequired("routes.txt", from: inputDirectory),
+        tripsCSV: readRequired("trips.txt", from: inputDirectory),
+        stopTimesCSV: readRequired("stop_times.txt", from: inputDirectory),
+        stopsCSV: readRequired("stops.txt", from: inputDirectory),
+        transfersCSV: readRequired("transfers.txt", from: inputDirectory),
+        shapesCSV: readRequired("shapes.txt", from: inputDirectory),
+        feedInfoCSV: readOptional("feed_info.txt", from: inputDirectory)
     )
     let resource = try StaticGTFSCompiler().compile(input)
     let data = try StaticGTFSCompiler.encode(resource)

@@ -192,7 +192,7 @@ public struct TrainVehicleObservation: Hashable, Sendable {
 public struct TrainObservation: Identifiable, Hashable, Sendable {
     public let id: TrainRunID
     public let entityIDs: [String]
-    public let routeID: String
+    public var routeID: String { id.routeID }
     public let directionID: Int?
     public let nyctDirection: TravelDirection?
     public let destination: String
@@ -206,7 +206,6 @@ public struct TrainObservation: Identifiable, Hashable, Sendable {
     public init(
         id: TrainRunID,
         entityIDs: [String],
-        routeID: String,
         directionID: Int?,
         nyctDirection: TravelDirection?,
         destination: String,
@@ -219,7 +218,6 @@ public struct TrainObservation: Identifiable, Hashable, Sendable {
     ) {
         self.id = id
         self.entityIDs = entityIDs.sorted()
-        self.routeID = RouteID.normalized(routeID)
         self.directionID = directionID
         self.nyctDirection = nyctDirection
         self.destination = destination

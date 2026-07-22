@@ -159,7 +159,6 @@ final class LiveMapPresentationTests: XCTestCase {
         )
         return TrainRenderSnapshot(
             id: id,
-            routeID: route,
             direction: .northbound,
             destination: "Manhattan",
             nextStopID: "R16N",

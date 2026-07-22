@@ -44,12 +44,6 @@ struct RealtimeTrip: Sendable {
 }
 
 struct RealtimeVehiclePosition: Sendable {
-    enum Status: Sendable {
-        case incomingAt
-        case stoppedAt
-        case inTransitTo
-    }
-
     let tripID: String
     let routeID: String
     let startDate: String
@@ -60,7 +54,7 @@ struct RealtimeVehiclePosition: Sendable {
     let nyctDirection: TravelDirection?
     let stopID: String?
     let stopSequence: Int?
-    let status: Status?
+    let status: TrainVehicleStatus?
     let timestamp: Date?
 }
 
@@ -141,7 +135,7 @@ public enum GTFSRealtimeParser {
         let descriptor = position.trip
         guard !descriptor.tripID.isEmpty else { return nil }
 
-        let status: RealtimeVehiclePosition.Status?
+        let status: TrainVehicleStatus?
         if position.hasCurrentStatus {
             status = switch position.currentStatus {
             case .incomingAt: .incomingAt

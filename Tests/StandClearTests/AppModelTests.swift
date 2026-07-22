@@ -398,7 +398,6 @@ final class AppModelTests: XCTestCase {
         return TrainObservation(
             id: id,
             entityIDs: ["entity"],
-            routeID: routeID,
             directionID: path.directionIDs.first,
             nyctDirection: .northbound,
             destination: "Test destination",

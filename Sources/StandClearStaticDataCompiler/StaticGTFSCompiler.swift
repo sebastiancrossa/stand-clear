@@ -78,7 +78,6 @@ public struct StaticGTFSCompiler: Sendable {
                 let longitude = Double(row["stop_lon"] ?? "")
             else { continue }
             stops[id] = Stop(
-                id: id,
                 stationID: (row["parent_station"]?.isEmpty == false ? row["parent_station"] : id) ?? id,
                 latitude: latitude,
                 longitude: longitude
@@ -213,7 +212,6 @@ public struct StaticGTFSCompiler: Sendable {
 
 private extension StaticGTFSCompiler {
     struct Stop {
-        let id: String
         let stationID: String
         let latitude: Double
         let longitude: Double
@@ -296,6 +294,27 @@ private extension StaticGTFSCompiler {
         points: [TrackPoint],
         stops: [String: Stop]
     ) -> [TrackStopAnchor] {
+        var dwellSamplesByStation: [String: [Int]] = [:]
+        var travelSamplesByStations: [StationPair: [Int]] = [:]
+        for candidate in allSequences {
+            var firstIndexByStation: [String: Int] = [:]
+            for (index, item) in candidate.enumerated() where firstIndexByStation[item.stationID] == nil {
+                firstIndexByStation[item.stationID] = index
+                if let arrival = item.arrival, let departure = item.departure, departure >= arrival {
+                    dwellSamplesByStation[item.stationID, default: []].append(departure - arrival)
+                }
+            }
+            for (stationID, index) in firstIndexByStation where candidate.indices.contains(index + 1) {
+                let current = candidate[index]
+                let next = candidate[index + 1]
+                guard let departure = current.departure, let arrival = next.arrival, arrival >= departure else { continue }
+                travelSamplesByStations[
+                    StationPair(from: stationID, to: next.stationID),
+                    default: []
+                ].append(arrival - departure)
+            }
+        }
+
         var minimumPointIndex = 0
         return sequence.enumerated().compactMap { offset, stopTime in
             guard let stop = stops[stopTime.stopID], minimumPointIndex < points.count else { return nil }
@@ -310,31 +329,17 @@ private extension StaticGTFSCompiler {
             ) <= 1_000 else { return nil }
             minimumPointIndex = best
 
-            let dwellSamples = allSequences.compactMap { candidate -> Int? in
-                guard let item = candidate.first(where: { $0.stationID == stopTime.stationID }),
-                      let arrival = item.arrival, let departure = item.departure, departure >= arrival
-                else { return nil }
-                return departure - arrival
-            }
             let nextStationID = sequence.indices.contains(offset + 1) ? sequence[offset + 1].stationID : nil
-            let travelSamples = allSequences.compactMap { candidate -> Int? in
-                guard let nextStationID,
-                      let currentIndex = candidate.firstIndex(where: { $0.stationID == stopTime.stationID }),
-                      candidate.indices.contains(currentIndex + 1),
-                      candidate[currentIndex + 1].stationID == nextStationID,
-                      let departure = candidate[currentIndex].departure,
-                      let arrival = candidate[currentIndex + 1].arrival,
-                      arrival >= departure
-                else { return nil }
-                return arrival - departure
-            }
+            let travelSamples = nextStationID.flatMap {
+                travelSamplesByStations[StationPair(from: stopTime.stationID, to: $0)]
+            } ?? []
             return TrackStopAnchor(
                 stopID: stopTime.stopID,
                 stationID: stopTime.stationID,
                 sequence: stopTime.sequence,
                 pointIndex: best,
                 distanceMeters: points[best].distanceMeters,
-                medianDwellSeconds: median(dwellSamples),
+                medianDwellSeconds: median(dwellSamplesByStation[stopTime.stationID] ?? []),
                 medianTravelSecondsToNext: median(travelSamples)
             )
         }
@@ -368,7 +373,12 @@ private extension StaticGTFSCompiler {
 
     func makeCorridors(_ paths: [TrackPath]) -> [RenderCorridor] {
         let grouped = Dictionary(grouping: paths) { path in
-            path.points.map { "\(rounded($0.latitude)),\(rounded($0.longitude))" }.joined(separator: ";")
+            path.points.map {
+                QuantizedPoint(
+                    latitude: Int64(($0.latitude * 1_000_000).rounded()),
+                    longitude: Int64(($0.longitude * 1_000_000).rounded())
+                )
+            }
         }
         return grouped.values.map { matches in
             let shapeIDs = matches.map(\.shapeID).sorted()
@@ -378,10 +388,6 @@ private extension StaticGTFSCompiler {
                 routeIDs: Set(matches.flatMap(\.routeIDs)).sorted()
             )
         }.sorted { $0.id < $1.id }
-    }
-
-    func rounded(_ value: Double) -> String {
-        String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 
     func transferGroups(_ csv: String, stops: [String: Stop]) throws -> [StationTransferGroup] {
@@ -416,6 +422,16 @@ private extension StaticGTFSCompiler {
         let value = first["feed_version"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         return value?.isEmpty == false ? value : nil
     }
+}
+
+private struct StationPair: Hashable {
+    let from: String
+    let to: String
+}
+
+private struct QuantizedPoint: Hashable {
+    let latitude: Int64
+    let longitude: Int64
 }
 
 private struct CSVTable {

@@ -34,23 +34,23 @@ final class LiveMapSessionTests: XCTestCase {
         let n = makeRunID(route: "N")
         let session = LiveMapSession(allRoutes: ["N", "Q"])
 
-        session.selectTrain(id: q, routeID: "Q")
-        session.reconcile(trainRoutes: [q: "Q", n: "N"])
+        session.selectTrain(id: q)
+        session.reconcile(trainIDs: [q, n])
         XCTAssertEqual(session.selectedTrainID, q)
 
         session.toggleRoute("Q")
         XCTAssertNil(session.selectedTrainID)
 
         session.showAllRoutes()
-        session.selectTrain(id: n, routeID: "N")
-        session.reconcile(trainRoutes: [q: "Q"])
+        session.selectTrain(id: n)
+        session.reconcile(trainIDs: [q])
         XCTAssertNil(session.selectedTrainID)
     }
 
     func testResetActionAdvancesTokenAndClearsSelection() {
         let q = makeRunID(route: "Q")
         let session = LiveMapSession(allRoutes: ["Q"])
-        session.selectTrain(id: q, routeID: "Q")
+        session.selectTrain(id: q)
         let initialToken = session.resetToken
 
         session.requestReset()

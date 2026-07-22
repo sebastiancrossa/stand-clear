@@ -314,7 +314,6 @@ private func train(
     TrainObservation(
         id: TrainRunID(feedID: feedID, routeID: "Q", tripID: tripID, serviceDate: "20270115", startTime: "08:30:00"),
         entityIDs: ["entity"],
-        routeID: "Q",
         directionID: 0,
         nyctDirection: .northbound,
         destination: "C",

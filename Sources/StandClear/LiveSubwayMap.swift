@@ -78,7 +78,6 @@ struct LiveSubwayMap: NSViewRepresentable {
         private var lastResetToken = 0
         private var reduceMotion = false
         private var trackOverlay: TrackNetworkOverlay?
-        private var trainOverlay: TrainNetworkOverlay?
         private weak var trackRenderer: TrackNetworkRenderer?
         private weak var trainRenderer: TrainNetworkRenderer?
         private var userLocationAnnotation: PassiveUserLocationAnnotation?
@@ -106,7 +105,6 @@ struct LiveSubwayMap: NSViewRepresentable {
             let trackOverlay = TrackNetworkOverlay(catalog: geometry)
             let trainOverlay = TrainNetworkOverlay()
             self.trackOverlay = trackOverlay
-            self.trainOverlay = trainOverlay
             mapView.addOverlay(trackOverlay, level: .aboveRoads)
             mapView.addOverlay(trainOverlay, level: .aboveLabels)
 
@@ -226,12 +224,19 @@ struct LiveSubwayMap: NSViewRepresentable {
             guard let mapView else { return }
             let mapRect = mapView.visibleMapRect
             let bounds = GeographicBounds(mapRect: mapRect)
-            let rendered = motionPlans.compactMap { $0.render(at: date) }
-            snapshots = LiveMapPresentation.visibleSnapshots(
-                rendered,
+            let rendered = motionPlans.lazy
+                .filter { self.selectedRoutes.contains($0.routeID) }
+                .compactMap { $0.render(at: date) }
+            let nextSnapshots = LiveMapPresentation.visibleSnapshots(
+                Array(rendered),
                 selectedRoutes: selectedRoutes,
                 bounds: bounds
             )
+            let needsRedraw = nextSnapshots != snapshots
+                || trainRenderer?.selectedTrainID != selectedTrainID
+                || trainRenderer?.reduceMotion != reduceMotion
+            guard needsRedraw else { return }
+            snapshots = nextSnapshots
             trainRenderer?.snapshots = snapshots
             trainRenderer?.selectedTrainID = selectedTrainID
             trainRenderer?.reduceMotion = reduceMotion
@@ -302,12 +307,9 @@ private final class TrackNetworkOverlay: NSObject, MKOverlay {
     let textColorsByRouteID: [String: NSColor]
 
     init(catalog: TrackGeometryCatalog) {
-        let pathsByShapeID = Dictionary(
-            uniqueKeysWithValues: catalog.resource.paths.map { ($0.shapeID, $0) }
-        )
         let corridors = catalog.resource.corridors.sorted { $0.id < $1.id }
         let source: [(TrackPath, [String])] = corridors.compactMap { corridor in
-            guard let path = corridor.shapeIDs.compactMap({ pathsByShapeID[$0] }).first else { return nil }
+            guard let path = corridor.shapeIDs.compactMap({ catalog.path(shapeID: $0) }).first else { return nil }
             return (path, RouteID.sorted(corridor.routeIDs))
         }
         let resolvedSource = source.isEmpty

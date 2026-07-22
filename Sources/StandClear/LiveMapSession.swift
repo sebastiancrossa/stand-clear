@@ -1,5 +1,4 @@
 import Combine
-import Foundation
 import StandClearCore
 
 @MainActor
@@ -9,7 +8,6 @@ final class LiveMapSession: ObservableObject {
     @Published private(set) var selectedTrainID: TrainRunID?
     @Published private(set) var resetToken = 0
 
-    private var selectedTrainRouteID: String?
     private var hasInitializedRoutes: Bool
 
     init(allRoutes: Set<String> = []) {
@@ -58,19 +56,17 @@ final class LiveMapSession: ObservableObject {
         selectedRoutes.contains(RouteID.normalized(routeID))
     }
 
-    func selectTrain(id: TrainRunID?, routeID: String? = nil) {
+    func selectTrain(id: TrainRunID?) {
         selectedTrainID = id
-        selectedTrainRouteID = routeID.map(RouteID.normalized)
         clearSelectionIfFiltered()
     }
 
-    func reconcile(trainRoutes: [TrainRunID: String]) {
+    func reconcile(trainIDs: Set<TrainRunID>) {
         guard let selectedTrainID else { return }
-        guard let routeID = trainRoutes[selectedTrainID] else {
+        guard trainIDs.contains(selectedTrainID) else {
             clearSelection()
             return
         }
-        selectedTrainRouteID = RouteID.normalized(routeID)
         clearSelectionIfFiltered()
     }
 
@@ -80,14 +76,13 @@ final class LiveMapSession: ObservableObject {
     }
 
     private func clearSelectionIfFiltered() {
-        guard let selectedTrainRouteID else { return }
-        if !selectedRoutes.contains(selectedTrainRouteID) {
+        guard let selectedTrainID else { return }
+        if !selectedRoutes.contains(selectedTrainID.routeID) {
             clearSelection()
         }
     }
 
     private func clearSelection() {
         selectedTrainID = nil
-        selectedTrainRouteID = nil
     }
 }

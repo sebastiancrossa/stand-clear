@@ -234,7 +234,7 @@ public struct TrackGeometryCatalog: Sendable {
     }
 
     public static func bundled() throws -> TrackGeometryCatalog {
-        let dataBundle = packagedResourceBundle() ?? Bundle.module
+        let dataBundle = Bundle.standClearResources
         guard let url = dataBundle.url(forResource: "subway_geometry", withExtension: "json") else {
             throw TrackGeometryCatalogError.missingBundledGeometry
         }
@@ -251,13 +251,6 @@ public struct TrackGeometryCatalog: Sendable {
 
     public func paths(forRoute routeID: String) -> [TrackPath] {
         pathsByRouteID[RouteID.normalized(routeID)] ?? []
-    }
-
-    private static func packagedResourceBundle() -> Bundle? {
-        guard let resourcesURL = Bundle.main.resourceURL else { return nil }
-        return Bundle(
-            url: resourcesURL.appendingPathComponent("StandClear_StandClearCore.bundle", isDirectory: true)
-        )
     }
 
     private static func isMonotonic(_ values: [Double]) -> Bool {

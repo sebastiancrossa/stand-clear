@@ -45,7 +45,7 @@ public struct TrainPosition: Equatable, Sendable {
 
 public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
     public let id: TrainRunID
-    public let routeID: String
+    public var routeID: String { id.routeID }
     public let direction: TravelDirection
     public let destination: String
     public let nextStopID: String?
@@ -61,7 +61,6 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
 
     public init(
         id: TrainRunID,
-        routeID: String,
         direction: TravelDirection,
         destination: String,
         nextStopID: String?,
@@ -76,7 +75,6 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
         feedTimestamp: Date
     ) {
         self.id = id
-        self.routeID = routeID
         self.direction = direction
         self.destination = destination
         self.nextStopID = nextStopID
@@ -94,7 +92,7 @@ public struct TrainRenderSnapshot: Identifiable, Equatable, Sendable {
 
 public struct TrainMotionPlan: Identifiable, Sendable {
     public let id: TrainRunID
-    public let routeID: String
+    public var routeID: String { id.routeID }
     public let direction: TravelDirection
     public let destination: String
     public let shapeID: String?
@@ -131,7 +129,6 @@ public struct TrainMotionPlan: Identifiable, Sendable {
 
         return TrainRenderSnapshot(
             id: id,
-            routeID: routeID,
             direction: direction,
             destination: destination,
             nextStopID: nextStopID,
@@ -279,14 +276,14 @@ public struct TrainProjectionEngine: Sendable {
                 ($0.shapeID == suffix || $0.shapeID.hasPrefix(suffix))
                     && Self.containsInOrder(upcomingStopIDs, in: $0)
             }
-            if let path = Self.uniquelyBest(suffixMatches, stops: upcomingStopIDs) {
-                return GeometryMatch(path: path, isStationFallback: false)
+            if let path = Self.uniqueCompatiblePath(suffixMatches) {
+                return GeometryMatch(path: path, mode: .shape)
             }
         }
 
         let compatible = routePaths.filter { Self.containsInOrder(upcomingStopIDs, in: $0) }
-        if let path = Self.uniqueCompatiblePath(compatible, stops: upcomingStopIDs) {
-            return GeometryMatch(path: path, isStationFallback: false)
+        if let path = Self.uniqueCompatiblePath(compatible) {
+            return GeometryMatch(path: path, mode: .shape)
         }
 
         let fallbackStopIDs = [observation.vehicle?.stopID, upcomingStopIDs.first].compactMap { $0 }
@@ -294,7 +291,7 @@ public struct TrainProjectionEngine: Sendable {
             if let path = routePaths.sorted(by: { $0.shapeID < $1.shapeID }).first(where: {
                 $0.anchors.contains { $0.stopID == stopID || $0.stationID == stopID }
             }) {
-                return GeometryMatch(path: path, isStationFallback: true, fallbackStopID: stopID)
+                return GeometryMatch(path: path, mode: .stationFallback(stopID: stopID))
             }
         }
         return nil
@@ -320,8 +317,8 @@ public struct TrainProjectionEngine: Sendable {
         var confidence: TrainConfidence = .high
         let curve: MotionCurve
 
-        if match.isStationFallback {
-            guard let stopID = match.fallbackStopID,
+        if case let .stationFallback(stopID) = match.mode {
+            guard
                   let anchor = path.anchors.first(where: { $0.stopID == stopID || $0.stationID == stopID })
             else { return nil }
             reasons.insert(.unmatchedGeometry)
@@ -390,7 +387,6 @@ public struct TrainProjectionEngine: Sendable {
 
         return TrainMotionPlan(
             id: observation.id,
-            routeID: observation.routeID,
             direction: observation.nyctDirection ?? Self.direction(from: observation.directionID),
             destination: observation.destination,
             shapeID: path.shapeID,
@@ -424,12 +420,7 @@ public struct TrainProjectionEngine: Sendable {
         return true
     }
 
-    private static func uniquelyBest(_ paths: [TrackPath], stops: [String]) -> TrackPath? {
-        if paths.count == 1 { return paths[0] }
-        return uniqueCompatiblePath(paths, stops: stops)
-    }
-
-    private static func uniqueCompatiblePath(_ paths: [TrackPath], stops: [String]) -> TrackPath? {
+    private static func uniqueCompatiblePath(_ paths: [TrackPath]) -> TrackPath? {
         guard !paths.isEmpty else { return nil }
         if paths.count == 1 { return paths[0] }
         let signatures = Dictionary(grouping: paths) { path in
@@ -466,15 +457,13 @@ public struct TrainProjectionEngine: Sendable {
 }
 
 private struct GeometryMatch {
-    let path: TrackPath
-    let isStationFallback: Bool
-    let fallbackStopID: String?
-
-    init(path: TrackPath, isStationFallback: Bool, fallbackStopID: String? = nil) {
-        self.path = path
-        self.isStationFallback = isStationFallback
-        self.fallbackStopID = fallbackStopID
+    enum Mode {
+        case shape
+        case stationFallback(stopID: String)
     }
+
+    let path: TrackPath
+    let mode: Mode
 }
 
 private struct TopologyTransition: Sendable {

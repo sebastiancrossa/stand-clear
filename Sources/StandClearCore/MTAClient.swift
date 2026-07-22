@@ -13,32 +13,24 @@ public enum MTAFeedError: LocalizedError {
 }
 
 public struct MTAClient {
-    public static let feedURLs = [
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-ace",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-bdfm",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-g",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-jz",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-l",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-nqrw",
-        "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs-si",
-    ].compactMap(URL.init(string:))
+    fileprivate struct FeedDescriptor: Sendable {
+        let id: String
+        let url: URL
+        let routeIDs: Set<String>
+    }
 
-    private static let feedIDs = [
-        "gtfs", "gtfs-ace", "gtfs-bdfm", "gtfs-g",
-        "gtfs-jz", "gtfs-l", "gtfs-nqrw", "gtfs-si",
+    private static let feeds: [FeedDescriptor] = [
+        feed("gtfs", "nyct%2Fgtfs", ["1", "2", "3", "4", "5", "5X", "6", "6X", "7", "7X", "GS"]),
+        feed("gtfs-ace", "nyct%2Fgtfs-ace", ["A", "C", "E", "H"]),
+        feed("gtfs-bdfm", "nyct%2Fgtfs-bdfm", ["B", "D", "F", "FX", "M", "FS"]),
+        feed("gtfs-g", "nyct%2Fgtfs-g", ["G"]),
+        feed("gtfs-jz", "nyct%2Fgtfs-jz", ["J", "Z"]),
+        feed("gtfs-l", "nyct%2Fgtfs-l", ["L"]),
+        feed("gtfs-nqrw", "nyct%2Fgtfs-nqrw", ["N", "Q", "R", "W"]),
+        feed("gtfs-si", "nyct%2Fgtfs-si", ["SI"]),
     ]
 
-    private static let routeIDsByFeedIndex: [Set<String>] = [
-        ["1", "2", "3", "4", "5", "5X", "6", "6X", "7", "7X", "GS"],
-        ["A", "C", "E", "H"],
-        ["B", "D", "F", "FX", "M", "FS"],
-        ["G"],
-        ["J", "Z"],
-        ["L"],
-        ["N", "Q", "R", "W"],
-        ["SI"],
-    ]
+    public static let feedURLs = feeds.map(\.url)
 
     private let session: URLSession
 
@@ -52,10 +44,10 @@ public struct MTAClient {
     ) async throws -> SystemFeedSnapshot {
         let session = session
         let results = await withTaskGroup(of: FeedFetchResult.self) { group in
-            for (index, url) in Self.feedURLs.enumerated() {
+            for (index, descriptor) in Self.feeds.enumerated() {
                 group.addTask {
                     do {
-                        var request = URLRequest(url: url)
+                        var request = URLRequest(url: descriptor.url)
                         request.timeoutInterval = 12
                         request.setValue("StandClear/1.0", forHTTPHeaderField: "User-Agent")
                         let (data, response) = try await session.data(for: request)
@@ -64,10 +56,11 @@ public struct MTAClient {
                         }
                         return FeedFetchResult(
                             index: index,
+                            descriptor: descriptor,
                             feed: try GTFSRealtimeParser.parse(data: data)
                         )
                     } catch {
-                        return FeedFetchResult(index: index, feed: nil)
+                        return FeedFetchResult(index: index, descriptor: descriptor, feed: nil)
                     }
                 }
             }
@@ -85,8 +78,8 @@ public struct MTAClient {
 
         let statuses = results.map { result in
             RealtimeFeedStatus(
-                feedID: Self.feedID(at: result.index),
-                routeIDs: Self.routeIDs(at: result.index),
+                feedID: result.descriptor.id,
+                routeIDs: result.descriptor.routeIDs,
                 state: result.feed == nil ? .failed : .succeeded,
                 feedTimestamp: result.feed?.timestamp,
                 deletedEntityIDs: Set(
@@ -97,18 +90,18 @@ public struct MTAClient {
             )
         }
 
-        let successfulFeeds = results.compactMap { result -> (Int, ParsedRealtimeFeed)? in
-            result.feed.map { (result.index, $0) }
+        let successfulFeeds = results.compactMap { result -> (FeedDescriptor, ParsedRealtimeFeed)? in
+            result.feed.map { (result.descriptor, $0) }
         }
         let arrivals = makeArrivals(
             trips: successfulFeeds.flatMap { $0.1.tripUpdates },
             catalog: catalog,
             now: now
         )
-        let trains = successfulFeeds.flatMap { index, feed in
+        let trains = successfulFeeds.flatMap { descriptor, feed in
             makeTrainObservations(
                 feed: feed,
-                feedID: Self.feedID(at: index),
+                feedID: descriptor.id,
                 catalog: catalog
             )
         }
@@ -190,8 +183,13 @@ public struct MTAClient {
         }
 
         var vehiclesByKey: [RunMatchKey: VehicleEntity] = [:]
+        var vehicleFallbackByTripID: [String: (RunMatchKey, VehicleEntity)] = [:]
         for entity in vehicleEntities {
-            vehiclesByKey[RunMatchKey(vehicle: entity.vehicle)] = entity
+            let key = RunMatchKey(vehicle: entity.vehicle)
+            vehiclesByKey[key] = entity
+            if vehicleFallbackByTripID[key.tripID] == nil {
+                vehicleFallbackByTripID[key.tripID] = (key, entity)
+            }
         }
 
         let tripKeysByTripID = Dictionary(grouping: tripEntities, by: { $0.trip.tripID })
@@ -204,10 +202,10 @@ public struct MTAClient {
             var matchedVehicleKey = key
             if vehicleEntity == nil,
                tripKeysByTripID[tripEntity.trip.tripID]?.count == 1,
-               let fallback = vehiclesByKey.first(where: { $0.key.tripID == tripEntity.trip.tripID })
+               let fallback = vehicleFallbackByTripID[tripEntity.trip.tripID]
             {
-                matchedVehicleKey = fallback.key
-                vehicleEntity = fallback.value
+                matchedVehicleKey = fallback.0
+                vehicleEntity = fallback.1
             }
             if vehicleEntity != nil {
                 consumedVehicleKeys.insert(matchedVehicleKey)
@@ -271,7 +269,7 @@ public struct MTAClient {
                 entityID: entity.entityID,
                 stopID: entity.vehicle.stopID,
                 stopSequence: entity.vehicle.stopSequence,
-                status: entity.vehicle.status.map(Self.vehicleStatus),
+                status: entity.vehicle.status,
                 timestamp: entity.vehicle.timestamp
             )
         }
@@ -285,7 +283,6 @@ public struct MTAClient {
                 startTime: startTime
             ),
             entityIDs: [tripEntity?.entityID, vehicleEntity?.entityID].compactMap { $0 },
-            routeID: routeID,
             directionID: trip?.directionID ?? vehicle?.directionID,
             nyctDirection: trip?.nyctDirection ?? vehicle?.nyctDirection,
             destination: destination(for: trip?.stops ?? [], catalog: catalog),
@@ -310,27 +307,18 @@ public struct MTAClient {
         return .unknown
     }
 
-    private static func vehicleStatus(
-        _ status: RealtimeVehiclePosition.Status
-    ) -> TrainVehicleStatus {
-        switch status {
-        case .incomingAt: .incomingAt
-        case .stoppedAt: .stoppedAt
-        case .inTransitTo: .inTransitTo
-        }
-    }
-
-    private static func feedID(at index: Int) -> String {
-        feedIDs.indices.contains(index) ? feedIDs[index] : "feed-\(index)"
-    }
-
-    private static func routeIDs(at index: Int) -> Set<String> {
-        routeIDsByFeedIndex.indices.contains(index) ? routeIDsByFeedIndex[index] : []
+    private static func feed(_ id: String, _ path: String, _ routeIDs: Set<String>) -> FeedDescriptor {
+        FeedDescriptor(
+            id: id,
+            url: URL(string: "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/\(path)")!,
+            routeIDs: routeIDs
+        )
     }
 }
 
 private struct FeedFetchResult: Sendable {
     let index: Int
+    let descriptor: MTAClient.FeedDescriptor
     let feed: ParsedRealtimeFeed?
 }
 
