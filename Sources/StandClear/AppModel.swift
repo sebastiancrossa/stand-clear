@@ -387,6 +387,10 @@ final class AppModel: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    func mapStationName(forStopID stopID: String) -> String? {
+        catalog?.stationName(forStopID: stopID)
+    }
+
     func quit() {
         NSApplication.shared.terminate(nil)
     }
