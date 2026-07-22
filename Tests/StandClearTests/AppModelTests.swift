@@ -64,6 +64,47 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.mapLatestFeedTimestamp, now)
     }
 
+    func testRefreshHidesAssignedPredepartureTrainAndReportsWaitingCoverage() async throws {
+        let now = Date()
+        let geometry = try TrackGeometryCatalog.bundled()
+        let path = try XCTUnwrap(geometry.resource.paths.first(where: { $0.anchors.count >= 2 }))
+        let routeID = try XCTUnwrap(path.routeIDs.first)
+        let observation = makeTrainObservation(
+            routeID: routeID,
+            path: path,
+            now: now,
+            hasActiveEvidence: false
+        )
+        let client = SnapshotClient(snapshots: [
+            SystemFeedSnapshot(
+                arrivals: [],
+                trains: [observation],
+                fetchedAt: now,
+                feedStatuses: [
+                    RealtimeFeedStatus(
+                        feedID: observation.id.feedID,
+                        routeIDs: [routeID],
+                        state: .succeeded,
+                        feedTimestamp: now
+                    ),
+                ]
+            ),
+        ])
+        let model = AppModel(
+            client: client,
+            defaults: makeDefaults(),
+            geometryLoader: FixedGeometryLoader(catalog: geometry)
+        )
+        await model.loadMapGeometry()
+
+        await model.refresh()
+
+        XCTAssertTrue(model.mapMotionPlans.isEmpty)
+        XCTAssertEqual(model.mapProjectionCoverage.predepartureObservationCount, 1)
+        XCTAssertEqual(model.mapProjectionCoverage.eligibleObservationCount, 0)
+        XCTAssertEqual(model.mapProjectionCoverage.unplacedTrainCount, 0)
+    }
+
     func testMapGeometryFailureDoesNotChangeStartupOrArrivalState() async {
         let now = Date()
         let arrival = makeArrival(id: "q", route: "Q", time: now.addingTimeInterval(120))
@@ -385,9 +426,10 @@ final class AppModelTests: XCTestCase {
     private func makeTrainObservation(
         routeID: String,
         path: TrackPath,
-        now: Date
+        now: Date,
+        hasActiveEvidence: Bool = true
     ) -> TrainObservation {
-        let next = path.anchors[1]
+        let next = hasActiveEvidence ? path.anchors[1] : path.anchors[0]
         let id = TrainRunID(
             feedID: "test-feed",
             routeID: routeID,
@@ -416,7 +458,15 @@ final class AppModelTests: XCTestCase {
                     actualTrack: nil
                 ),
             ],
-            vehicle: nil
+            vehicle: hasActiveEvidence
+                ? TrainVehicleObservation(
+                    entityID: "vehicle",
+                    stopID: next.stopID,
+                    stopSequence: next.sequence,
+                    status: .inTransitTo,
+                    timestamp: now
+                )
+                : nil
         )
     }
 }

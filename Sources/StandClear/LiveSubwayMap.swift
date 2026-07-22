@@ -594,6 +594,8 @@ private struct LiveMapMotionRevision: Equatable {
         let nextStopID: String?
         let nextArrivalTime: Date?
         let confidence: TrainConfidence
+        let movementState: TrainMovementState
+        let reasons: Set<TrainProjectionReason>
         let feedTimestamp: Date
         let vehicleTimestamp: Date?
     }
@@ -610,6 +612,8 @@ private struct LiveMapMotionRevision: Equatable {
                 nextStopID: $0.nextStopID,
                 nextArrivalTime: $0.nextArrivalTime,
                 confidence: $0.confidence,
+                movementState: $0.movementState,
+                reasons: $0.reasons,
                 feedTimestamp: $0.feedTimestamp,
                 vehicleTimestamp: $0.vehicleTimestamp
             )
@@ -981,15 +985,15 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
             width: radius * 2,
             height: radius * 2
         )
-        let healthAlpha: Double = snapshot.health == .live ? 1 : 0.62
+        let presentation = LiveMapPresentation.markerPresentation(for: snapshot)
 
         context.saveGState()
         defer { context.restoreGState() }
-        context.setAlpha(alpha * healthAlpha)
+        context.setAlpha(alpha * presentation.opacity)
 
         let routeColor = colorsByRouteID[snapshot.routeID]
             ?? NSColor(hexString: RouteColor.backgroundHex(for: snapshot.routeID))
-        if let heading = snapshot.headingDegrees {
+        if presentation.showsDirectionArrow, let heading = snapshot.headingDegrees {
             let indicatorClearance = radius + ((isSelected ? 7 : 4) * mapUnitsPerPoint)
             drawDirectionArrow(
                 headingDegrees: heading,
@@ -1011,7 +1015,7 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
         context.setLineWidth(2.5 * mapUnitsPerPoint)
         context.strokeEllipse(in: markerRect)
 
-        if snapshot.confidence == .low || snapshot.health != .live {
+        if presentation.usesDashedRing {
             context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
             context.setLineWidth(1.5 * mapUnitsPerPoint)
             context.setLineDash(
@@ -1034,8 +1038,11 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
             in: context
         )
 
-        if snapshot.health == .stalled {
-            context.setStrokeColor(NSColor.white.cgColor)
+        if presentation.indicator != .none {
+            let indicatorColor: NSColor = presentation.indicator == .stalled
+                ? .systemYellow
+                : NSColor.white.withAlphaComponent(0.78)
+            context.setStrokeColor(indicatorColor.cgColor)
             context.setLineWidth(2 * mapUnitsPerPoint)
             context.move(
                 to: CGPoint(

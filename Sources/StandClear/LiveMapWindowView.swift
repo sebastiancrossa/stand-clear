@@ -245,12 +245,29 @@ struct LiveMapWindowView: View {
             $0 + (model.mapProjectionCoverage.expiredTrainCountsByRoute[$1] ?? 0)
         }
         let placementGaps = relevantStatuses.filter { status in
-            let eligible = model.mapProjectionCoverage.eligibleTrainCountsByFeed[status.feedID] ?? 0
-            let placed = model.mapProjectionCoverage.placedTrainCountsByFeed[status.feedID] ?? 0
-            return eligible > placed
+            let counts = projectionCounts(for: status)
+            return counts.eligibleTrainCount > counts.placedTrainCount
         }
+        let selectedCounts = LiveMapPresentation.projectionCountSummary(
+            model.mapProjectionCoverage,
+            selectedRoutes: session.selectedRoutes
+        )
+        let waitingCount = selectedCounts.waitingTrainCount
+        let movementCountsByFeed = Dictionary(grouping: snapshots, by: { $0.id.feedID })
+            .mapValues { snapshots in
+                Dictionary(grouping: snapshots, by: \.movementState).mapValues(\.count)
+            }
         return Menu {
             Text("\(mapActivity.activeTrainCount) active across selected lines")
+            Text(
+                "\(mapActivity.inTransitTrainCount) moving · "
+                    + "\(mapActivity.atStationTrainCount) at station · "
+                    + "\(mapActivity.stalledTrainCount) stalled · "
+                    + "\(mapActivity.unknownTrainCount) uncertain"
+            )
+            if waitingCount > 0 {
+                Text("\(waitingCount) assigned run\(waitingCount == 1 ? "" : "s") waiting to start")
+            }
             if mapActivity.clusterCount > 0 {
                 Text("\(mapActivity.clusterCount) overlapping group\(mapActivity.clusterCount == 1 ? "" : "s")")
             }
@@ -279,7 +296,12 @@ struct LiveMapWindowView: View {
                 }
             }
             Divider()
-            Text("● Station  ▰ Live train")
+            Text("Movement by feed")
+            ForEach(relevantStatuses, id: \.self) { status in
+                Text(feedMovementDetail(status, movementCounts: movementCountsByFeed[status.feedID] ?? [:]))
+            }
+            Divider()
+            Text(LiveMapPresentation.markerLegend)
             Divider()
             if visibleSnapshots.isEmpty {
                 Text("No visible trains")
@@ -308,10 +330,36 @@ struct LiveMapWindowView: View {
     }
 
     private func feedPlacementDetail(_ status: RealtimeFeedStatus) -> String {
-        let routes = RouteID.sorted(status.routeIDs).map(RouteID.displayLabel).joined(separator: ", ")
-        let eligible = model.mapProjectionCoverage.eligibleTrainCountsByFeed[status.feedID] ?? 0
-        let placed = model.mapProjectionCoverage.placedTrainCountsByFeed[status.feedID] ?? 0
-        return "\(routes): \(placed) of \(eligible) runs placed"
+        let routes = selectedRouteLabels(for: status)
+        let counts = projectionCounts(for: status)
+        return "\(routes): \(counts.placedTrainCount) of \(counts.eligibleTrainCount) runs placed"
+    }
+
+    private func feedMovementDetail(
+        _ status: RealtimeFeedStatus,
+        movementCounts: [TrainMovementState: Int]
+    ) -> String {
+        let routes = selectedRouteLabels(for: status)
+        let counts = projectionCounts(for: status)
+        return "\(routes): \(movementCounts[.inTransit, default: 0]) moving, "
+            + "\(movementCounts[.atStation, default: 0]) at station, "
+            + "\(movementCounts[.stalled, default: 0]) stalled, "
+            + "\(movementCounts[.unknown, default: 0]) uncertain, "
+            + "\(counts.waitingTrainCount) waiting, \(counts.unplacedTrainCount) unplaced"
+    }
+
+    private func projectionCounts(for status: RealtimeFeedStatus) -> LiveMapProjectionCountSummary {
+        LiveMapPresentation.projectionCountSummary(
+            model.mapProjectionCoverage,
+            selectedRoutes: session.selectedRoutes,
+            feedID: status.feedID
+        )
+    }
+
+    private func selectedRouteLabels(for status: RealtimeFeedStatus) -> String {
+        RouteID.sorted(status.routeIDs.intersection(session.selectedRoutes))
+            .map(RouteID.displayLabel)
+            .joined(separator: ", ")
     }
 
     private func routeFilters(_ geometry: TrackGeometryCatalog) -> some View {
@@ -403,7 +451,15 @@ struct LiveMapWindowView: View {
             Spacer(minLength: 12)
 
             VStack(alignment: .trailing, spacing: 5) {
-                Label(healthText(snapshot.health), systemImage: healthSymbol(snapshot.health))
+                Label(
+                    LiveMapPresentation.movementDescription(snapshot.movementState),
+                    systemImage: movementSymbol(snapshot.movementState)
+                )
+                .foregroundStyle(movementColor(snapshot.movementState))
+                Label(
+                    LiveMapPresentation.dataHealthDescription(snapshot.health),
+                    systemImage: healthSymbol(snapshot.health)
+                )
                     .foregroundStyle(healthColor(snapshot.health))
                 Text("\(confidenceText(snapshot.confidence)) confidence")
                 if !snapshot.reasons.isEmpty {
@@ -555,26 +611,39 @@ struct LiveMapWindowView: View {
         }
     }
 
-    private func healthText(_ health: TrainDataHealth) -> String {
-        switch health {
-        case .live: "Live estimate"
-        case .aging: "Feed aging"
-        case .stalled: "Train stalled"
-        case .expired: "Expired"
-        }
-    }
-
     private func healthSymbol(_ health: TrainDataHealth) -> String {
         switch health {
         case .live: "wave.3.right"
         case .aging: "clock.badge.exclamationmark"
-        case .stalled: "pause.circle"
         case .expired: "xmark.circle"
         }
     }
 
     private func healthColor(_ health: TrainDataHealth) -> Color {
-        health == .live ? .green : .yellow
+        switch health {
+        case .live: .green
+        case .aging: .yellow
+        case .expired: .red
+        }
+    }
+
+    private func movementSymbol(_ state: TrainMovementState) -> String {
+        switch state {
+        case .preDeparture: "clock"
+        case .atStation: "pause.circle"
+        case .inTransit: "arrow.forward.circle"
+        case .stalled: "exclamationmark.triangle.fill"
+        case .unknown: "questionmark.circle"
+        }
+    }
+
+    private func movementColor(_ state: TrainMovementState) -> Color {
+        switch state {
+        case .inTransit: .green
+        case .atStation: .secondary
+        case .stalled: .yellow
+        case .unknown, .preDeparture: .secondary
+        }
     }
 
     private func confidenceText(_ confidence: TrainConfidence) -> String {
@@ -589,6 +658,7 @@ struct LiveMapWindowView: View {
         reasons.sorted { $0.rawValue < $1.rawValue }.map { reason in
             switch reason {
             case .inferredDeparture: "departure inferred"
+            case .localSegmentMatch: "local track match"
             case .trackMismatch: "platform changed"
             case .topologyMismatch: "route corrected"
             case .unmatchedGeometry: "station-only estimate"
@@ -602,7 +672,9 @@ struct LiveMapWindowView: View {
             .map { ", next stop \($0)" }
             ?? ""
         return "\(RouteID.displayLabel(snapshot.routeID)) train, \(destinationText(snapshot)), "
-            + "\(directionText(snapshot.direction))\(nextStop), \(healthText(snapshot.health)), "
+            + "\(directionText(snapshot.direction))\(nextStop), "
+            + "\(LiveMapPresentation.movementDescription(snapshot.movementState)), "
+            + "\(LiveMapPresentation.dataHealthDescription(snapshot.health)), "
             + "\(confidenceText(snapshot.confidence)) confidence"
     }
 }

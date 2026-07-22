@@ -9,6 +9,13 @@ final class LiveMapPresentationTests: XCTestCase {
             makeSnapshot(index: 1, route: "A", latitude: 40.75, longitude: -73.98),
             makeSnapshot(index: 2, route: "Q", latitude: 40.76, longitude: -73.97),
             makeSnapshot(index: 3, route: "A", latitude: 41.20, longitude: -73.98, health: .expired),
+            makeSnapshot(
+                index: 4,
+                route: "A",
+                latitude: 40.75,
+                longitude: -73.98,
+                movementState: .preDeparture
+            ),
         ]
 
         let visible = LiveMapPresentation.visibleSnapshots(
@@ -115,6 +122,56 @@ final class LiveMapPresentationTests: XCTestCase {
         XCTAssertEqual(summary.clusterCount, 1)
         XCTAssertEqual(summary.unplacedTrainCount, 2)
         XCTAssertEqual(summary.clusterTrainIDSets, [Set(active.prefix(3).map(\.id))])
+    }
+
+    func testActivitySummarySeparatesMovementStatesAndExcludesPredeparture() {
+        let snapshots = [
+            makeSnapshot(index: 1, route: "A", latitude: 40.75, longitude: -73.98, movementState: .inTransit),
+            makeSnapshot(index: 2, route: "A", latitude: 40.75, longitude: -73.98, movementState: .atStation),
+            makeSnapshot(index: 3, route: "A", latitude: 40.75, longitude: -73.98, movementState: .stalled),
+            makeSnapshot(index: 4, route: "A", latitude: 40.75, longitude: -73.98, movementState: .unknown),
+            makeSnapshot(index: 5, route: "A", latitude: 40.75, longitude: -73.98, movementState: .preDeparture),
+        ]
+        let visible = Array(snapshots.prefix(4))
+
+        let summary = LiveMapPresentation.activitySummary(
+            activeSnapshots: snapshots,
+            visibleGroups: visible.map { LiveMapTrainGroup(snapshots: [$0], point: .zero) },
+            unplacedTrainCount: 2
+        )
+
+        XCTAssertEqual(summary.activeTrainCount, 4)
+        XCTAssertEqual(summary.inTransitTrainCount, 1)
+        XCTAssertEqual(summary.atStationTrainCount, 1)
+        XCTAssertEqual(summary.stalledTrainCount, 1)
+        XCTAssertEqual(summary.unknownTrainCount, 1)
+    }
+
+    func testProjectionCountsScopeSharedFeedDiagnosticsToSelectedRoutes() {
+        let coverage = TrainProjectionCoverage(
+            eligibleObservationCount: 5,
+            placedTrainCount: 3,
+            predepartureObservationCount: 3,
+            predepartureTrainCountsByRoute: ["N": 2, "Q": 1],
+            unplacedTrainCountsByRoute: ["N": 2, "Q": 1],
+            eligibleTrainCountsByRoute: ["N": 3, "Q": 2],
+            placedTrainCountsByRoute: ["N": 1, "Q": 2],
+            eligibleTrainCountsByFeedAndRoute: ["gtfs-nqrw": ["N": 3, "Q": 2]],
+            placedTrainCountsByFeedAndRoute: ["gtfs-nqrw": ["N": 1, "Q": 2]],
+            unplacedTrainCountsByFeedAndRoute: ["gtfs-nqrw": ["N": 2, "Q": 1]],
+            predepartureTrainCountsByFeedAndRoute: ["gtfs-nqrw": ["N": 2, "Q": 1]]
+        )
+
+        let selected = LiveMapPresentation.projectionCountSummary(
+            coverage,
+            selectedRoutes: ["Q"],
+            feedID: "gtfs-nqrw"
+        )
+
+        XCTAssertEqual(selected.eligibleTrainCount, 2)
+        XCTAssertEqual(selected.placedTrainCount, 2)
+        XCTAssertEqual(selected.waitingTrainCount, 1)
+        XCTAssertEqual(selected.unplacedTrainCount, 1)
     }
 
     func testGroupHitTestReturnsTheNearestCluster() {
@@ -239,9 +296,25 @@ final class LiveMapPresentationTests: XCTestCase {
             isTransfer: true,
             showsInOverview: true
         )
-        let train = makeSnapshot(index: 1, route: "A", latitude: 40.75, longitude: -73.98)
+        let train = makeSnapshot(
+            index: 1,
+            route: "A",
+            latitude: 40.75,
+            longitude: -73.98,
+            health: .aging,
+            movementState: .atStation
+        )
         let cluster = LiveMapTrainGroup(
-            snapshots: [train, makeSnapshot(index: 2, route: "Q", latitude: 40.75, longitude: -73.98)],
+            snapshots: [
+                train,
+                makeSnapshot(
+                    index: 2,
+                    route: "Q",
+                    latitude: 40.75,
+                    longitude: -73.98,
+                    movementState: .stalled
+                ),
+            ],
             point: .zero
         )
 
@@ -249,12 +322,86 @@ final class LiveMapPresentationTests: XCTestCase {
             LiveMapPresentation.stationAccessibilityLabel(station),
             "Canal Street station. A and Q trains. Transfer complex."
         )
-        XCTAssertTrue(LiveMapPresentation.trainGroupAccessibilityLabel(
+        let trainLabel = LiveMapPresentation.trainGroupAccessibilityLabel(
             LiveMapTrainGroup(snapshots: [train], point: .zero)
-        ).contains("A live train to Manhattan"))
+        )
+        XCTAssertTrue(trainLabel.contains("A train to Manhattan. At station."))
+        XCTAssertTrue(trainLabel.contains("Feed aging."))
+        let clusterLabel = LiveMapPresentation.trainGroupAccessibilityLabel(cluster)
+        XCTAssertTrue(clusterLabel.contains("2 trains grouped here. Routes A and Q."))
+        XCTAssertTrue(clusterLabel.contains("1 at station and 1 stalled."))
+    }
+
+    func testMovementAndFeedDescriptionsUseSeparateVocabularies() {
+        XCTAssertEqual(LiveMapPresentation.movementDescription(.inTransit), "In transit")
+        XCTAssertEqual(LiveMapPresentation.movementDescription(.atStation), "At station")
+        XCTAssertEqual(LiveMapPresentation.movementDescription(.stalled), "Stalled")
+        XCTAssertEqual(LiveMapPresentation.movementDescription(.unknown), "Position uncertain")
+        XCTAssertEqual(LiveMapPresentation.dataHealthDescription(.live), "Feed live")
+        XCTAssertEqual(LiveMapPresentation.dataHealthDescription(.aging), "Feed aging")
+        XCTAssertEqual(LiveMapPresentation.dataHealthDescription(.expired), "Feed expired")
+    }
+
+    func testMarkerPresentationMakesStationaryAndUncertainStatesLegible() {
+        let inTransit = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(index: 1, route: "A", latitude: 40.75, longitude: -73.98, movementState: .inTransit)
+        )
+        let atStation = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(index: 2, route: "A", latitude: 40.75, longitude: -73.98, movementState: .atStation)
+        )
+        let stalled = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(index: 3, route: "A", latitude: 40.75, longitude: -73.98, movementState: .stalled)
+        )
+        let unknown = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(index: 4, route: "A", latitude: 40.75, longitude: -73.98, movementState: .unknown)
+        )
+
+        XCTAssertEqual(inTransit.indicator, .none)
+        XCTAssertFalse(inTransit.usesDashedRing)
+        XCTAssertEqual(atStation.indicator, .atStation)
+        XCTAssertFalse(atStation.usesDashedRing)
+        XCTAssertEqual(stalled.indicator, .stalled)
+        XCTAssertTrue(stalled.usesDashedRing)
+        XCTAssertLessThan(stalled.opacity, inTransit.opacity)
+        XCTAssertEqual(unknown.indicator, .none)
+        XCTAssertTrue(unknown.usesDashedRing)
+        XCTAssertLessThan(unknown.opacity, stalled.opacity)
+    }
+
+    func testMarkerDirectionArrowCommunicatesHeadingNotMotion() {
+        let atStation = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(
+                index: 1,
+                route: "A",
+                latitude: 40.75,
+                longitude: -73.98,
+                movementState: .atStation,
+                headingDegrees: 90
+            )
+        )
+        let stalled = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(
+                index: 2,
+                route: "A",
+                latitude: 40.75,
+                longitude: -73.98,
+                movementState: .stalled,
+                headingDegrees: 180
+            )
+        )
+        let missingHeading = LiveMapPresentation.markerPresentation(
+            for: makeSnapshot(index: 3, route: "A", latitude: 40.75, longitude: -73.98)
+        )
+
+        XCTAssertTrue(atStation.showsDirectionArrow)
+        XCTAssertTrue(stalled.showsDirectionArrow)
+        XCTAssertFalse(missingHeading.showsDirectionArrow)
+    }
+
+    func testMarkerLegendClarifiesThatTheArrowShowsDirection() {
         XCTAssertEqual(
-            LiveMapPresentation.trainGroupAccessibilityLabel(cluster),
-            "2 live trains grouped here. Routes A and Q."
+            LiveMapPresentation.markerLegend,
+            "● Station  ▰ Train  ↑ Arrow = travel direction"
         )
     }
 
@@ -418,7 +565,9 @@ final class LiveMapPresentationTests: XCTestCase {
         route: String,
         latitude: Double,
         longitude: Double,
-        health: TrainDataHealth = .live
+        health: TrainDataHealth = .live,
+        movementState: TrainMovementState = .inTransit,
+        headingDegrees: Double? = nil
     ) -> TrainRenderSnapshot {
         let id = TrainRunID(
             feedID: "test",
@@ -434,11 +583,13 @@ final class LiveMapPresentationTests: XCTestCase {
             nextStopID: "R16N",
             nextArrivalTime: Date(timeIntervalSince1970: 1_060),
             position: TrainPosition(latitude: latitude, longitude: longitude, distanceMeters: 1_000),
+            headingDegrees: headingDegrees,
             previousTopologyPosition: nil,
             topologyTransitionProgress: 1,
             velocityMetersPerSecond: 8,
             confidence: .high,
             health: health,
+            movementState: movementState,
             reasons: [],
             feedTimestamp: Date(timeIntervalSince1970: 1_000)
         )

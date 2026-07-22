@@ -36,22 +36,49 @@ struct LiveMapTrainGroup {
     var isCluster: Bool { snapshots.count > 1 }
 }
 
+enum LiveMapTrainMarkerIndicator: Equatable {
+    case none
+    case atStation
+    case stalled
+}
+
+struct LiveMapTrainMarkerPresentation: Equatable {
+    let opacity: Double
+    let usesDashedRing: Bool
+    let indicator: LiveMapTrainMarkerIndicator
+    let showsDirectionArrow: Bool
+}
+
 struct LiveMapActivitySummary: Equatable {
     let activeTrainCount: Int
     let visibleTrainCount: Int
     let clusterCount: Int
     let unplacedTrainCount: Int
+    let movementStateCounts: [TrainMovementState: Int]
     let visibleTrainIDs: Set<TrainRunID>
     let clusterTrainIDSets: [Set<TrainRunID>]
+
+    var inTransitTrainCount: Int { movementStateCounts[.inTransit, default: 0] }
+    var atStationTrainCount: Int { movementStateCounts[.atStation, default: 0] }
+    var stalledTrainCount: Int { movementStateCounts[.stalled, default: 0] }
+    var unknownTrainCount: Int { movementStateCounts[.unknown, default: 0] }
 
     static let empty = LiveMapActivitySummary(
         activeTrainCount: 0,
         visibleTrainCount: 0,
         clusterCount: 0,
         unplacedTrainCount: 0,
+        movementStateCounts: [:],
         visibleTrainIDs: [],
         clusterTrainIDSets: []
     )
+}
+
+struct LiveMapProjectionCountSummary: Equatable {
+    let eligibleTrainCount: Int
+    let placedTrainCount: Int
+    let waitingTrainCount: Int
+    let unplacedTrainCount: Int
 }
 
 enum LiveMapStationDetail: Equatable {
@@ -66,6 +93,67 @@ enum LiveMapClusterSelectionAction: Equatable {
 }
 
 enum LiveMapPresentation {
+    static let markerLegend = "● Station  ▰ Train  ↑ Arrow = travel direction"
+
+    static func movementDescription(_ state: TrainMovementState) -> String {
+        switch state {
+        case .preDeparture: "Waiting to start"
+        case .atStation: "At station"
+        case .inTransit: "In transit"
+        case .stalled: "Stalled"
+        case .unknown: "Position uncertain"
+        }
+    }
+
+    static func dataHealthDescription(_ health: TrainDataHealth) -> String {
+        switch health {
+        case .live: "Feed live"
+        case .aging: "Feed aging"
+        case .expired: "Feed expired"
+        }
+    }
+
+    static func markerPresentation(
+        for snapshot: TrainRenderSnapshot
+    ) -> LiveMapTrainMarkerPresentation {
+        let movementOpacity: Double
+        let indicator: LiveMapTrainMarkerIndicator
+        switch snapshot.movementState {
+        case .preDeparture:
+            movementOpacity = 0
+            indicator = .none
+        case .inTransit:
+            movementOpacity = 1
+            indicator = .none
+        case .atStation:
+            movementOpacity = 1
+            indicator = .atStation
+        case .stalled:
+            movementOpacity = 0.78
+            indicator = .stalled
+        case .unknown:
+            movementOpacity = 0.55
+            indicator = .none
+        }
+        let healthOpacity: Double
+        switch snapshot.health {
+        case .live: healthOpacity = 1
+        case .aging: healthOpacity = 0.62
+        case .expired: healthOpacity = 0
+        }
+        return LiveMapTrainMarkerPresentation(
+            opacity: movementOpacity * healthOpacity,
+            usesDashedRing: snapshot.confidence == .low
+                || snapshot.health != .live
+                || snapshot.movementState == .stalled
+                || snapshot.movementState == .unknown,
+            indicator: indicator,
+            showsDirectionArrow: snapshot.headingDegrees != nil
+                && snapshot.health != .expired
+                && snapshot.movementState != .preDeparture
+        )
+    }
+
     static func visibleSnapshots(
         _ snapshots: [TrainRenderSnapshot],
         selectedRoutes: Set<String>,
@@ -73,9 +161,32 @@ enum LiveMapPresentation {
     ) -> [TrainRenderSnapshot] {
         snapshots.filter { snapshot in
             snapshot.health != .expired
+                && snapshot.movementState != .preDeparture
                 && selectedRoutes.contains(RouteID.normalized(snapshot.routeID))
                 && bounds.contains(snapshot.position)
         }
+    }
+
+    static func projectionCountSummary(
+        _ coverage: TrainProjectionCoverage,
+        selectedRoutes: Set<String>,
+        feedID: String? = nil
+    ) -> LiveMapProjectionCountSummary {
+        let routes = Set(selectedRoutes.map(RouteID.normalized))
+        let eligibleCounts = feedID.map { coverage.eligibleTrainCountsByFeedAndRoute[$0] ?? [:] }
+            ?? coverage.eligibleTrainCountsByRoute
+        let placedCounts = feedID.map { coverage.placedTrainCountsByFeedAndRoute[$0] ?? [:] }
+            ?? coverage.placedTrainCountsByRoute
+        let waitingCounts = feedID.map { coverage.predepartureTrainCountsByFeedAndRoute[$0] ?? [:] }
+            ?? coverage.predepartureTrainCountsByRoute
+        let unplacedCounts = feedID.map { coverage.unplacedTrainCountsByFeedAndRoute[$0] ?? [:] }
+            ?? coverage.unplacedTrainCountsByRoute
+        return LiveMapProjectionCountSummary(
+            eligibleTrainCount: routes.reduce(0) { $0 + eligibleCounts[$1, default: 0] },
+            placedTrainCount: routes.reduce(0) { $0 + placedCounts[$1, default: 0] },
+            waitingTrainCount: routes.reduce(0) { $0 + waitingCounts[$1, default: 0] },
+            unplacedTrainCount: routes.reduce(0) { $0 + unplacedCounts[$1, default: 0] }
+        )
     }
 
     static func visibleStations(
@@ -260,11 +371,18 @@ enum LiveMapPresentation {
         visibleGroups: [LiveMapTrainGroup],
         unplacedTrainCount: Int
     ) -> LiveMapActivitySummary {
-        LiveMapActivitySummary(
-            activeTrainCount: activeSnapshots.count,
+        var activeTrainCount = 0
+        var movementStateCounts: [TrainMovementState: Int] = [:]
+        for snapshot in activeSnapshots where snapshot.movementState != .preDeparture {
+            activeTrainCount += 1
+            movementStateCounts[snapshot.movementState, default: 0] += 1
+        }
+        return LiveMapActivitySummary(
+            activeTrainCount: activeTrainCount,
             visibleTrainCount: visibleGroups.reduce(0) { $0 + $1.snapshots.count },
             clusterCount: visibleGroups.count(where: \.isCluster),
             unplacedTrainCount: unplacedTrainCount,
+            movementStateCounts: movementStateCounts,
             visibleTrainIDs: Set(visibleGroups.flatMap(\.snapshots).map(\.id)),
             clusterTrainIDSets: visibleGroups.filter(\.isCluster).map {
                 Set($0.snapshots.map(\.id))
@@ -299,15 +417,31 @@ enum LiveMapPresentation {
     }
 
     static func trainGroupAccessibilityLabel(_ group: LiveMapTrainGroup) -> String {
-        guard let snapshot = group.snapshots.first else { return "Live train marker." }
+        guard let snapshot = group.snapshots.first else { return "Train marker." }
         if group.isCluster {
             let routes = joinedList(
                 RouteID.sorted(Set(group.snapshots.map(\.routeID))).map(RouteID.displayLabel)
             )
-            return "\(group.snapshots.count) live trains grouped here. Routes \(routes)."
+            let movementCounts = Dictionary(grouping: group.snapshots, by: \.movementState)
+                .mapValues(\.count)
+            let movementSummary = joinedList(
+                [
+                    TrainMovementState.inTransit,
+                    .atStation,
+                    .stalled,
+                    .unknown,
+                ].compactMap { state in
+                    guard let count = movementCounts[state], count > 0 else { return nil }
+                    return "\(count) \(movementDescription(state).lowercased())"
+                }
+            )
+            let stateDescription = movementSummary.isEmpty ? "" : " \(movementSummary)."
+            return "\(group.snapshots.count) trains grouped here. Routes \(routes).\(stateDescription)"
         }
         let destination = snapshot.destination.isEmpty ? "an unavailable destination" : snapshot.destination
-        return "\(RouteID.displayLabel(snapshot.routeID)) \(snapshot.health == .live ? "live" : "stale") train to \(destination)."
+        return "\(RouteID.displayLabel(snapshot.routeID)) train to \(destination). "
+            + "\(movementDescription(snapshot.movementState)). "
+            + "\(dataHealthDescription(snapshot.health))."
     }
 
     private static func isOrderedBefore(

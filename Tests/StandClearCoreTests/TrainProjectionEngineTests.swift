@@ -2,6 +2,157 @@
 import XCTest
 
 final class TrainProjectionEngineTests: XCTestCase {
+    func testPredepartureTrainIsHiddenAndExcludedFromEligibleCoverage() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("AN", sequence: 1, departure: now.addingTimeInterval(120))],
+            feedTimestamp: now,
+            hasActiveEvidence: false
+        )
+
+        let plans = engine.update(observations: [observation], at: now)
+
+        XCTAssertTrue(plans.isEmpty)
+        XCTAssertEqual(engine.coverage.eligibleObservationCount, 0)
+        XCTAssertEqual(engine.coverage.predepartureObservationCount, 1)
+        XCTAssertEqual(engine.coverage.predepartureTrainCountsByRoute, ["Q": 1])
+        XCTAssertEqual(engine.coverage.predepartureTrainCountsByFeed, ["gtfs-nqrw": 1])
+        XCTAssertEqual(
+            engine.coverage.predepartureTrainCountsByFeedAndRoute,
+            ["gtfs-nqrw": ["Q": 1]]
+        )
+    }
+
+    func testTripUpdateOnlyFutureNextStopIsActiveRatherThanPredeparture() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", sequence: 2, arrival: now.addingTimeInterval(120))],
+            feedTimestamp: now,
+            hasActiveEvidence: false
+        )
+
+        let plan = try XCTUnwrap(engine.update(observations: [observation], at: now).first)
+        let rendered = try XCTUnwrap(plan.render(at: now))
+
+        XCTAssertEqual(engine.coverage.predepartureObservationCount, 0)
+        XCTAssertEqual(engine.coverage.eligibleObservationCount, 1)
+        XCTAssertEqual(rendered.movementState, .unknown)
+    }
+
+    func testMissingVehicleStatusWithStopSequenceIsInTransitWhileDataIsLive() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: nil,
+            timestamp: now
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", arrival: now.addingTimeInterval(100))],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+
+        let rendered = try XCTUnwrap(
+            engine.update(observations: [observation], at: now).first?.render(at: now.addingTimeInterval(10))
+        )
+
+        XCTAssertEqual(rendered.health, .live)
+        XCTAssertEqual(rendered.movementState, .inTransit)
+        XCTAssertGreaterThan(rendered.velocityMetersPerSecond, 0)
+    }
+
+    func testInTransitTimelineArrivesDwellsAndContinuesToFollowingStop() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .inTransitTo,
+            timestamp: now
+        )
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [
+                stop(
+                    "BN",
+                    arrival: now.addingTimeInterval(20),
+                    departure: now.addingTimeInterval(40)
+                ),
+                stop("CN", arrival: now.addingTimeInterval(120)),
+            ],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let plan = try XCTUnwrap(engine.update(observations: [observation], at: now).first)
+
+        let approaching = try XCTUnwrap(plan.render(at: now.addingTimeInterval(10)))
+        XCTAssertEqual(approaching.movementState, .inTransit)
+        XCTAssertLessThan(approaching.position.distanceMeters, 1_000)
+        XCTAssertGreaterThan(approaching.velocityMetersPerSecond, 0)
+        XCTAssertEqual(approaching.nextStopID, "BN")
+
+        let dwelling = try XCTUnwrap(plan.render(at: now.addingTimeInterval(30)))
+        XCTAssertEqual(dwelling.movementState, .atStation)
+        XCTAssertEqual(dwelling.position.distanceMeters, 1_000, accuracy: 0.001)
+        XCTAssertEqual(dwelling.velocityMetersPerSecond, 0)
+        XCTAssertEqual(dwelling.nextStopID, "BN")
+
+        let continuing = try XCTUnwrap(plan.render(at: now.addingTimeInterval(50)))
+        XCTAssertEqual(continuing.movementState, .inTransit)
+        XCTAssertGreaterThan(continuing.position.distanceMeters, 1_000)
+        XCTAssertLessThan(continuing.position.distanceMeters, 2_000)
+        XCTAssertGreaterThan(continuing.velocityMetersPerSecond, 0)
+        XCTAssertEqual(continuing.nextStopID, "CN")
+        XCTAssertEqual(continuing.nextArrivalTime, now.addingTimeInterval(120))
+    }
+
+    func testPreviouslyActiveTrainDoesNotRevertToPredepartureWhenVehicleFieldsDisappear() throws {
+        let start = Date(timeIntervalSince1970: 10_000)
+        let activeVehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .inTransitTo,
+            timestamp: start
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let active = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", arrival: start.addingTimeInterval(100))],
+            feedTimestamp: start,
+            vehicle: activeVehicle
+        )
+        let initialPlan = try XCTUnwrap(engine.update(observations: [active], at: start).first)
+        let refresh = start.addingTimeInterval(30)
+        let beforeRefresh = try XCTUnwrap(initialPlan.render(at: refresh))
+        let incomplete = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", arrival: start.addingTimeInterval(100))],
+            feedTimestamp: refresh,
+            vehicle: nil,
+            hasActiveEvidence: false
+        )
+
+        let retainedPlan = try XCTUnwrap(engine.update(observations: [incomplete], at: refresh).first)
+        let immediatelyAfter = try XCTUnwrap(retainedPlan.render(at: refresh))
+        let later = try XCTUnwrap(retainedPlan.render(at: refresh.addingTimeInterval(10)))
+
+        XCTAssertEqual(engine.coverage.predepartureObservationCount, 0)
+        XCTAssertEqual(immediatelyAfter.movementState, .unknown)
+        XCTAssertEqual(immediatelyAfter.position, beforeRefresh.position)
+        XCTAssertEqual(later.position, immediatelyAfter.position)
+        XCTAssertEqual(later.velocityMetersPerSecond, 0)
+    }
+
     func testExactShapeSuffixProjectsTrainBetweenStops() throws {
         let now = Date(timeIntervalSince1970: 10_000)
         var engine = TrainProjectionEngine(catalog: try geometryCatalog())
@@ -33,6 +184,59 @@ final class TrainProjectionEngineTests: XCTestCase {
         )
 
         XCTAssertEqual(plans.first?.shapeID, "Q..N16R")
+    }
+
+    func testSharedImmediateSegmentResolvesEvenWhenFullShapesDiverge() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .inTransitTo,
+            timestamp: now
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let observation = train(
+            tripID: "083000_Q..N",
+            stops: [stop("BN", arrival: now.addingTimeInterval(100))],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+
+        let plan = try XCTUnwrap(engine.update(observations: [observation], at: now).first)
+        let rendered = try XCTUnwrap(plan.render(at: now.addingTimeInterval(10)))
+
+        XCTAssertEqual(plan.shapeID, "Q..N16R")
+        XCTAssertEqual(rendered.confidence, .medium)
+        XCTAssertTrue(rendered.reasons.contains(.localSegmentMatch))
+        XCTAssertEqual(rendered.movementState, .inTransit)
+        XCTAssertGreaterThan(rendered.velocityMetersPerSecond, 0)
+    }
+
+    func testSharedStopIDsWithDivergentImmediateGeometryDoNotResolveLocally() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .inTransitTo,
+            timestamp: now
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog(includeDivergentSharedSegment: true))
+        let observation = train(
+            tripID: "083000_Q..N",
+            stops: [stop("BN", arrival: now.addingTimeInterval(100))],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+
+        let rendered = try XCTUnwrap(engine.update(observations: [observation], at: now).first?.render(at: now))
+
+        XCTAssertEqual(rendered.movementState, .unknown)
+        XCTAssertEqual(rendered.velocityMetersPerSecond, 0)
+        XCTAssertEqual(rendered.confidence, .low)
+        XCTAssertTrue(rendered.reasons.contains(.unmatchedGeometry))
+        XCTAssertFalse(rendered.reasons.contains(.localSegmentMatch))
     }
 
     func testAmbiguousPathFallsBackOnlyToVerifiedStationAndNeverGuessesLine() throws {
@@ -84,6 +288,126 @@ final class TrainProjectionEngineTests: XCTestCase {
         XCTAssertEqual(rendered.velocityMetersPerSecond, 0)
         XCTAssertEqual(rendered.confidence, .medium)
         XCTAssertTrue(rendered.reasons.contains(.trackMismatch))
+    }
+
+    func testStoppedStatusAtPriorStopMovesTowardAdvancedTripUpdateStop() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "AN",
+            stopSequence: 1,
+            status: .stoppedAt,
+            timestamp: now
+        )
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("BN", arrival: now.addingTimeInterval(100))],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+
+        let rendered = try XCTUnwrap(
+            engine.update(observations: [observation], at: now).first?.render(at: now.addingTimeInterval(10))
+        )
+
+        XCTAssertEqual(rendered.movementState, .inTransit)
+        XCTAssertGreaterThan(rendered.position.distanceMeters, 0)
+        XCTAssertLessThan(rendered.position.distanceMeters, 1_000)
+        XCTAssertGreaterThan(rendered.velocityMetersPerSecond, 0)
+    }
+
+    func testStoppedStatusUsesVehicleAnchorWhenTripUpdateSkipsIntermediateStops() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "AN",
+            stopSequence: 1,
+            status: .stoppedAt,
+            timestamp: now
+        )
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [stop("CN", arrival: now.addingTimeInterval(100))],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+
+        let rendered = try XCTUnwrap(
+            engine.update(observations: [observation], at: now).first?.render(at: now.addingTimeInterval(10))
+        )
+
+        XCTAssertEqual(rendered.movementState, .inTransit)
+        XCTAssertGreaterThan(rendered.position.distanceMeters, 0)
+        XCTAssertLessThan(rendered.position.distanceMeters, 1_000)
+    }
+
+    func testStoppedTrainDwellsThenAdvancesToFollowingStop() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .stoppedAt,
+            timestamp: now
+        )
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [
+                stop("BN", arrival: now, departure: now.addingTimeInterval(20)),
+                stop("CN", arrival: now.addingTimeInterval(120)),
+            ],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let plan = try XCTUnwrap(engine.update(observations: [observation], at: now).first)
+
+        let dwelling = try XCTUnwrap(plan.render(at: now.addingTimeInterval(10)))
+        XCTAssertEqual(dwelling.movementState, .atStation)
+        XCTAssertEqual(dwelling.position.distanceMeters, 1_000, accuracy: 0.001)
+        XCTAssertEqual(dwelling.velocityMetersPerSecond, 0)
+        XCTAssertEqual(dwelling.nextStopID, "BN")
+
+        let departed = try XCTUnwrap(plan.render(at: now.addingTimeInterval(30)))
+        XCTAssertEqual(departed.movementState, .inTransit)
+        XCTAssertGreaterThan(departed.position.distanceMeters, 1_000)
+        XCTAssertLessThan(departed.position.distanceMeters, 2_000)
+        XCTAssertGreaterThan(departed.velocityMetersPerSecond, 0)
+        XCTAssertEqual(departed.nextStopID, "CN")
+        XCTAssertEqual(departed.nextArrivalTime, now.addingTimeInterval(120))
+    }
+
+    func testStoppedTrainWithElapsedDepartureStillDwellsBeforeAdvancing() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vehicle = TrainVehicleObservation(
+            entityID: "vehicle",
+            stopID: "BN",
+            stopSequence: 2,
+            status: .stoppedAt,
+            timestamp: now
+        )
+        let observation = train(
+            tripID: "083000_Q..N16R",
+            stops: [
+                stop("BN", arrival: now.addingTimeInterval(-20), departure: now.addingTimeInterval(-5)),
+                stop("CN", arrival: now.addingTimeInterval(120)),
+            ],
+            feedTimestamp: now,
+            vehicle: vehicle
+        )
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let plan = try XCTUnwrap(engine.update(observations: [observation], at: now).first)
+
+        let dwelling = try XCTUnwrap(plan.render(at: now.addingTimeInterval(10)))
+        XCTAssertEqual(dwelling.movementState, .atStation)
+        XCTAssertEqual(dwelling.position.distanceMeters, 1_000, accuracy: 0.001)
+        XCTAssertEqual(dwelling.velocityMetersPerSecond, 0)
+
+        let departed = try XCTUnwrap(plan.render(at: now.addingTimeInterval(30)))
+        XCTAssertEqual(departed.movementState, .inTransit)
+        XCTAssertGreaterThan(departed.position.distanceMeters, 1_000)
     }
 
     func testFeedAgingFreezesAtSixtySecondsAndExpiresAtNinety() throws {
@@ -140,11 +464,20 @@ final class TrainProjectionEngineTests: XCTestCase {
         XCTAssertEqual(engine.coverage.eligibleTrainCountsByFeed, ["feed-a": 1, "feed-b": 1])
         XCTAssertEqual(engine.coverage.placedTrainCountsByFeed, ["feed-a": 1])
         XCTAssertEqual(engine.coverage.unplacedTrainCountsByFeed, ["feed-b": 1])
+        XCTAssertEqual(
+            engine.coverage.eligibleTrainCountsByFeedAndRoute,
+            ["feed-a": ["Q": 1], "feed-b": ["Q": 1]]
+        )
+        XCTAssertEqual(engine.coverage.placedTrainCountsByFeedAndRoute, ["feed-a": ["Q": 1]])
+        XCTAssertEqual(engine.coverage.unplacedTrainCountsByFeedAndRoute, ["feed-b": ["Q": 1]])
         XCTAssertEqual(engine.coverage.eligibleTrainCountsByRoute, ["Q": 2])
         XCTAssertEqual(engine.coverage.placedTrainCountsByRoute, ["Q": 1])
         XCTAssertEqual(engine.coverage.expiredTrainCountsByRoute, ["Q": 1])
         XCTAssertEqual(engine.coverage.expiredTrainCountsByFeed, ["feed-b": 1])
         XCTAssertEqual(engine.coverage.expiredObservationCount, 1)
+        XCTAssertEqual(engine.coverage.movementStateCounts, [.inTransit: 1])
+        XCTAssertEqual(engine.coverage.movementStateCountsByFeed, ["feed-a": [.inTransit: 1]])
+        XCTAssertEqual(engine.coverage.projectionReasonCountsByFeed["feed-a"]?[.inferredDeparture], 1)
     }
 
     func testRetargetPreservesPositionAndNeverReversesOrOvershoots() throws {
@@ -172,6 +505,40 @@ final class TrainProjectionEngineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(immediatelyAfter.velocityMetersPerSecond, 0)
         XCTAssertEqual(afterArrival.position.distanceMeters, 1_000, accuracy: 0.001)
         XCTAssertEqual(afterArrival.velocityMetersPerSecond, 0)
+    }
+
+    func testRefreshDoesNotReturnToAStopAlreadyPassedByPriorTimeline() throws {
+        let start = Date(timeIntervalSince1970: 10_000)
+        var engine = TrainProjectionEngine(catalog: try geometryCatalog())
+        let initial = train(
+            tripID: "083000_Q..N16R",
+            stops: [
+                stop("BN", arrival: start.addingTimeInterval(20)),
+                stop("CN", arrival: start.addingTimeInterval(120)),
+            ],
+            feedTimestamp: start
+        )
+        let initialPlan = try XCTUnwrap(engine.update(observations: [initial], at: start).first)
+        let refresh = start.addingTimeInterval(60)
+        let before = try XCTUnwrap(initialPlan.render(at: refresh))
+        XCTAssertGreaterThan(before.position.distanceMeters, 1_000)
+
+        let repeatedStops = train(
+            tripID: "083000_Q..N16R",
+            stops: [
+                stop("BN", arrival: start.addingTimeInterval(20)),
+                stop("CN", arrival: start.addingTimeInterval(120)),
+            ],
+            feedTimestamp: refresh
+        )
+        let refreshedPlan = try XCTUnwrap(engine.update(observations: [repeatedStops], at: refresh).first)
+        let atRefresh = try XCTUnwrap(refreshedPlan.render(at: refresh))
+        let afterRefresh = try XCTUnwrap(refreshedPlan.render(at: refresh.addingTimeInterval(10)))
+
+        XCTAssertEqual(atRefresh.position.distanceMeters, before.position.distanceMeters, accuracy: 0.001)
+        XCTAssertEqual(atRefresh.nextStopID, "CN")
+        XCTAssertGreaterThanOrEqual(afterRefresh.position.distanceMeters, atRefresh.position.distanceMeters)
+        XCTAssertLessThanOrEqual(afterRefresh.position.distanceMeters, 2_000)
     }
 
     func testBranchChangeRebasesWithCrossfadeInsteadOfTravelingBetweenPaths() throws {
@@ -220,7 +587,8 @@ final class TrainProjectionEngineTests: XCTestCase {
         let stalledPlan = try XCTUnwrap(engine.update(observations: [stalledObservation], at: start).first)
         let frozen = try XCTUnwrap(stalledPlan.render(at: start))
 
-        XCTAssertEqual(frozen.health, .stalled)
+        XCTAssertEqual(frozen.health, .live)
+        XCTAssertEqual(frozen.movementState, .stalled)
         XCTAssertEqual(frozen.velocityMetersPerSecond, 0)
         XCTAssertEqual(stalledPlan.render(at: start.addingTimeInterval(10))?.position, frozen.position)
 
@@ -242,6 +610,7 @@ final class TrainProjectionEngineTests: XCTestCase {
         let recovered = try XCTUnwrap(recoveredPlan.render(at: recoveryTime))
 
         XCTAssertEqual(recovered.health, .live)
+        XCTAssertEqual(recovered.movementState, .inTransit)
         XCTAssertEqual(recovered.position, frozen.position)
     }
 }
@@ -303,7 +672,75 @@ final class TrainObservationCacheTests: XCTestCase {
     }
 }
 
-private func geometryCatalog() throws -> TrackGeometryCatalog {
+private func geometryCatalog(includeDivergentSharedSegment: Bool = false) throws -> TrackGeometryCatalog {
+    var paths = [
+        TrackPath(
+            shapeID: "Q..N16R",
+            routeIDs: ["Q"],
+            directionIDs: [0],
+            points: [
+                TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
+                TrackPoint(latitude: 40.1, longitude: -73.9, distanceMeters: 1_000),
+                TrackPoint(latitude: 40.2, longitude: -73.8, distanceMeters: 2_000),
+            ],
+            anchors: [
+                TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
+                TrackStopAnchor(stopID: "BN", stationID: "B", sequence: 2, pointIndex: 1, distanceMeters: 1_000, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
+                TrackStopAnchor(stopID: "CN", stationID: "C", sequence: 3, pointIndex: 2, distanceMeters: 2_000, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
+            ]
+        ),
+        TrackPath(
+            shapeID: "Q..N19R",
+            routeIDs: ["Q"],
+            directionIDs: [0],
+            points: [
+                TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
+                TrackPoint(latitude: 40.05, longitude: -73.95, distanceMeters: 800),
+                TrackPoint(latitude: 40.2, longitude: -73.8, distanceMeters: 2_000),
+            ],
+            anchors: [
+                TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 80),
+                TrackStopAnchor(stopID: "DN", stationID: "D", sequence: 2, pointIndex: 1, distanceMeters: 800, medianDwellSeconds: 20, medianTravelSecondsToNext: 120),
+                TrackStopAnchor(stopID: "CN", stationID: "C", sequence: 3, pointIndex: 2, distanceMeters: 2_000, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
+            ]
+        ),
+        TrackPath(
+            shapeID: "Q..N16R_ALT",
+            routeIDs: ["Q"],
+            directionIDs: [0],
+            points: [
+                TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
+                TrackPoint(latitude: 40.05, longitude: -73.95, distanceMeters: 500),
+                TrackPoint(latitude: 40.1, longitude: -73.9, distanceMeters: 1_000),
+                TrackPoint(latitude: 40.25, longitude: -73.75, distanceMeters: 2_200),
+            ],
+            anchors: [
+                TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
+                TrackStopAnchor(stopID: "BN", stationID: "B", sequence: 2, pointIndex: 2, distanceMeters: 1_000, medianDwellSeconds: 20, medianTravelSecondsToNext: 120),
+                TrackStopAnchor(stopID: "EN", stationID: "E", sequence: 3, pointIndex: 3, distanceMeters: 2_200, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
+            ]
+        ),
+    ]
+    if includeDivergentSharedSegment {
+        paths.append(
+            TrackPath(
+                shapeID: "Q..N16R_DIVERGENT",
+                routeIDs: ["Q"],
+                directionIDs: [0],
+                points: [
+                    TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
+                    TrackPoint(latitude: 40.15, longitude: -74.15, distanceMeters: 700),
+                    TrackPoint(latitude: 40.1, longitude: -73.9, distanceMeters: 1_400),
+                    TrackPoint(latitude: 40.25, longitude: -73.75, distanceMeters: 2_400),
+                ],
+                anchors: [
+                    TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
+                    TrackStopAnchor(stopID: "BN", stationID: "B", sequence: 2, pointIndex: 2, distanceMeters: 1_400, medianDwellSeconds: 20, medianTravelSecondsToNext: 120),
+                    TrackStopAnchor(stopID: "EN", stationID: "E", sequence: 3, pointIndex: 3, distanceMeters: 2_400, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
+                ]
+            )
+        )
+    }
     let resource = SubwayGeometryResource(
         feedVersion: "fixture",
         routes: [
@@ -316,38 +753,7 @@ private func geometryCatalog() throws -> TrackGeometryCatalog {
                 sortOrder: 1
             ),
         ],
-        paths: [
-            TrackPath(
-                shapeID: "Q..N16R",
-                routeIDs: ["Q"],
-                directionIDs: [0],
-                points: [
-                    TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
-                    TrackPoint(latitude: 40.1, longitude: -73.9, distanceMeters: 1_000),
-                    TrackPoint(latitude: 40.2, longitude: -73.8, distanceMeters: 2_000),
-                ],
-                anchors: [
-                    TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
-                    TrackStopAnchor(stopID: "BN", stationID: "B", sequence: 2, pointIndex: 1, distanceMeters: 1_000, medianDwellSeconds: 20, medianTravelSecondsToNext: 100),
-                    TrackStopAnchor(stopID: "CN", stationID: "C", sequence: 3, pointIndex: 2, distanceMeters: 2_000, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
-                ]
-            ),
-            TrackPath(
-                shapeID: "Q..N19R",
-                routeIDs: ["Q"],
-                directionIDs: [0],
-                points: [
-                    TrackPoint(latitude: 40.0, longitude: -74.0, distanceMeters: 0),
-                    TrackPoint(latitude: 40.05, longitude: -73.95, distanceMeters: 800),
-                    TrackPoint(latitude: 40.2, longitude: -73.8, distanceMeters: 2_000),
-                ],
-                anchors: [
-                    TrackStopAnchor(stopID: "AN", stationID: "A", sequence: 1, pointIndex: 0, distanceMeters: 0, medianDwellSeconds: 20, medianTravelSecondsToNext: 80),
-                    TrackStopAnchor(stopID: "DN", stationID: "D", sequence: 2, pointIndex: 1, distanceMeters: 800, medianDwellSeconds: 20, medianTravelSecondsToNext: 120),
-                    TrackStopAnchor(stopID: "CN", stationID: "C", sequence: 3, pointIndex: 2, distanceMeters: 2_000, medianDwellSeconds: 20, medianTravelSecondsToNext: nil),
-                ]
-            ),
-        ],
+        paths: paths,
         corridors: [],
         transferGroups: [],
         validationWarnings: []
@@ -360,9 +766,17 @@ private func train(
     tripID: String = "trip",
     stops: [TrainStopObservation],
     feedTimestamp: Date = Date(timeIntervalSince1970: 10_000),
-    vehicle: TrainVehicleObservation? = nil
+    vehicle: TrainVehicleObservation? = nil,
+    hasActiveEvidence: Bool = true
 ) -> TrainObservation {
-    TrainObservation(
+    let resolvedVehicle = vehicle ?? (hasActiveEvidence ? TrainVehicleObservation(
+        entityID: "vehicle",
+        stopID: stops.first?.stopID,
+        stopSequence: stops.first?.stopSequence ?? 1,
+        status: .inTransitTo,
+        timestamp: feedTimestamp
+    ) : nil)
+    return TrainObservation(
         id: TrainRunID(feedID: feedID, routeID: "Q", tripID: tripID, serviceDate: "20270115", startTime: "08:30:00"),
         entityIDs: ["entity"],
         directionID: 0,
@@ -373,7 +787,7 @@ private func train(
         feedTimestamp: feedTimestamp,
         tripUpdateTimestamp: feedTimestamp,
         stops: stops,
-        vehicle: vehicle
+        vehicle: resolvedVehicle
     )
 }
 
@@ -400,6 +814,7 @@ private func status(
 
 private func stop(
     _ id: String,
+    sequence: Int? = nil,
     arrival: Date? = nil,
     departure: Date? = nil,
     scheduledTrack: String? = nil,
@@ -407,7 +822,7 @@ private func stop(
 ) -> TrainStopObservation {
     TrainStopObservation(
         stopID: id,
-        stopSequence: nil,
+        stopSequence: sequence,
         arrivalTime: arrival,
         departureTime: departure,
         isSkipped: false,
