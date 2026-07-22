@@ -4,6 +4,7 @@ import SwiftUI
 
 struct StandClearMenuView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         ZStack {
@@ -119,6 +120,15 @@ struct StandClearMenuView: View {
             }
 
             Spacer()
+
+            Button {
+                openWindow(id: "live-map")
+            } label: {
+                Image(systemName: "map")
+            }
+            .buttonStyle(.plain)
+            .help("Open Live Map")
+            .accessibilityLabel("Open Live Map")
 
             Button {
                 Task { await model.refresh() }

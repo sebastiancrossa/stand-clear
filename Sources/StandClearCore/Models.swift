@@ -111,6 +111,186 @@ public struct FeedSnapshot: Sendable {
     }
 }
 
+public struct TrainRunID: Hashable, Sendable {
+    public let feedID: String
+    public let routeID: String
+    public let tripID: String
+    public let serviceDate: String
+    public let startTime: String
+
+    public init(
+        feedID: String,
+        routeID: String,
+        tripID: String,
+        serviceDate: String,
+        startTime: String
+    ) {
+        self.feedID = feedID
+        self.routeID = RouteID.normalized(routeID)
+        self.tripID = tripID
+        self.serviceDate = serviceDate
+        self.startTime = startTime
+    }
+}
+
+public struct TrainStopObservation: Hashable, Sendable {
+    public let stopID: String
+    public let stopSequence: Int?
+    public let arrivalTime: Date?
+    public let departureTime: Date?
+    public let isSkipped: Bool
+    public let scheduledTrack: String?
+    public let actualTrack: String?
+
+    public init(
+        stopID: String,
+        stopSequence: Int?,
+        arrivalTime: Date?,
+        departureTime: Date?,
+        isSkipped: Bool,
+        scheduledTrack: String?,
+        actualTrack: String?
+    ) {
+        self.stopID = stopID
+        self.stopSequence = stopSequence
+        self.arrivalTime = arrivalTime
+        self.departureTime = departureTime
+        self.isSkipped = isSkipped
+        self.scheduledTrack = scheduledTrack
+        self.actualTrack = actualTrack
+    }
+}
+
+public enum TrainVehicleStatus: String, Hashable, Sendable {
+    case incomingAt
+    case stoppedAt
+    case inTransitTo
+}
+
+public struct TrainVehicleObservation: Hashable, Sendable {
+    public let entityID: String
+    public let stopID: String?
+    public let stopSequence: Int?
+    public let status: TrainVehicleStatus?
+    public let timestamp: Date?
+
+    public init(
+        entityID: String,
+        stopID: String?,
+        stopSequence: Int?,
+        status: TrainVehicleStatus?,
+        timestamp: Date?
+    ) {
+        self.entityID = entityID
+        self.stopID = stopID
+        self.stopSequence = stopSequence
+        self.status = status
+        self.timestamp = timestamp
+    }
+}
+
+public struct TrainObservation: Identifiable, Hashable, Sendable {
+    public let id: TrainRunID
+    public let entityIDs: [String]
+    public var routeID: String { id.routeID }
+    public let directionID: Int?
+    public let nyctDirection: TravelDirection?
+    public let destination: String
+    public let isAssigned: Bool
+    public let nyctTrainID: String?
+    public let feedTimestamp: Date?
+    public let tripUpdateTimestamp: Date?
+    public let stops: [TrainStopObservation]
+    public let vehicle: TrainVehicleObservation?
+
+    public init(
+        id: TrainRunID,
+        entityIDs: [String],
+        directionID: Int?,
+        nyctDirection: TravelDirection?,
+        destination: String,
+        isAssigned: Bool,
+        nyctTrainID: String?,
+        feedTimestamp: Date?,
+        tripUpdateTimestamp: Date?,
+        stops: [TrainStopObservation],
+        vehicle: TrainVehicleObservation?
+    ) {
+        self.id = id
+        self.entityIDs = entityIDs.sorted()
+        self.directionID = directionID
+        self.nyctDirection = nyctDirection
+        self.destination = destination
+        self.isAssigned = isAssigned
+        self.nyctTrainID = nyctTrainID
+        self.feedTimestamp = feedTimestamp
+        self.tripUpdateTimestamp = tripUpdateTimestamp
+        self.stops = stops
+        self.vehicle = vehicle
+    }
+}
+
+public enum RealtimeFeedState: String, Hashable, Sendable {
+    case succeeded
+    case failed
+}
+
+public struct RealtimeFeedStatus: Hashable, Sendable {
+    public let feedID: String
+    public let routeIDs: Set<String>
+    public let state: RealtimeFeedState
+    public let feedTimestamp: Date?
+    public let deletedEntityIDs: Set<String>
+
+    public init(
+        feedID: String,
+        routeIDs: Set<String>,
+        state: RealtimeFeedState,
+        feedTimestamp: Date? = nil,
+        deletedEntityIDs: Set<String> = []
+    ) {
+        self.feedID = feedID
+        self.routeIDs = Set(routeIDs.map(RouteID.normalized))
+        self.state = state
+        self.feedTimestamp = feedTimestamp
+        self.deletedEntityIDs = deletedEntityIDs
+    }
+}
+
+public struct SystemFeedSnapshot: Sendable {
+    public let arrivals: [Arrival]
+    public let trains: [TrainObservation]
+    public let fetchedAt: Date
+    public let feedStatuses: [RealtimeFeedStatus]
+
+    public init(
+        arrivals: [Arrival],
+        trains: [TrainObservation],
+        fetchedAt: Date,
+        feedStatuses: [RealtimeFeedStatus]
+    ) {
+        self.arrivals = arrivals
+        self.trains = trains
+        self.fetchedAt = fetchedAt
+        self.feedStatuses = feedStatuses
+    }
+
+    public var failedFeedCount: Int {
+        feedStatuses.count { $0.state == .failed }
+    }
+
+    public var failedRouteIDs: Set<String> {
+        feedStatuses.reduce(into: Set<String>()) { routeIDs, status in
+            guard status.state == .failed else { return }
+            routeIDs.formUnion(status.routeIDs)
+        }
+    }
+
+    public var latestFeedTimestamp: Date? {
+        feedStatuses.compactMap(\.feedTimestamp).max()
+    }
+}
+
 public enum RouteID {
     public static let displayGroups = [
         ["A", "C", "E"],

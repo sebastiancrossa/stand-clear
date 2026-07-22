@@ -5,6 +5,92 @@ import XCTest
 
 @MainActor
 final class AppModelTests: XCTestCase {
+    func testCompositeRefreshPreservesArrivalMergeAndRetainsFailedFeedTrainPlans() async throws {
+        let now = Date()
+        let geometry = try TrackGeometryCatalog.bundled()
+        let path = try XCTUnwrap(geometry.resource.paths.first(where: { $0.anchors.count >= 2 }))
+        let routeID = try XCTUnwrap(path.routeIDs.first)
+        let observation = makeTrainObservation(routeID: routeID, path: path, now: now)
+        let cachedArrival = makeArrival(id: "cached", route: routeID, time: now.addingTimeInterval(120))
+        let freshArrival = makeArrival(id: "fresh", route: "G", time: now.addingTimeInterval(180))
+        let client = SnapshotClient(snapshots: [
+            SystemFeedSnapshot(
+                arrivals: [cachedArrival],
+                trains: [observation],
+                fetchedAt: now,
+                feedStatuses: [
+                    RealtimeFeedStatus(
+                        feedID: observation.id.feedID,
+                        routeIDs: [routeID],
+                        state: .succeeded,
+                        feedTimestamp: now
+                    ),
+                ]
+            ),
+            SystemFeedSnapshot(
+                arrivals: [freshArrival],
+                trains: [],
+                fetchedAt: now.addingTimeInterval(1),
+                feedStatuses: [
+                    RealtimeFeedStatus(
+                        feedID: observation.id.feedID,
+                        routeIDs: [routeID],
+                        state: .failed
+                    ),
+                ]
+            ),
+        ])
+        let model = AppModel(
+            client: client,
+            defaults: makeDefaults(),
+            geometryLoader: FixedGeometryLoader(catalog: geometry)
+        )
+        await model.loadMapGeometry()
+
+        await model.refresh()
+        XCTAssertEqual(model.mapMotionPlans.map(\.id), [observation.id])
+
+        await model.refresh()
+
+        XCTAssertEqual(Set(model.allArrivals.map(\.id)), ["cached", "fresh"])
+        XCTAssertEqual(model.mapMotionPlans.map(\.id), [observation.id])
+        XCTAssertEqual(model.mapFeedStatuses.first?.state, .failed)
+        XCTAssertEqual(model.mapLatestFeedTimestamp, now)
+
+        await model.refresh()
+
+        XCTAssertEqual(model.mapMotionPlans.map(\.id), [observation.id])
+        XCTAssertEqual(model.mapFeedStatuses.first?.state, .failed)
+        XCTAssertEqual(model.mapLatestFeedTimestamp, now)
+    }
+
+    func testMapGeometryFailureDoesNotChangeStartupOrArrivalState() async {
+        let now = Date()
+        let arrival = makeArrival(id: "q", route: "Q", time: now.addingTimeInterval(120))
+        let client = SnapshotClient(snapshots: [
+            SystemFeedSnapshot(
+                arrivals: [arrival],
+                trains: [],
+                fetchedAt: now,
+                feedStatuses: []
+            ),
+        ])
+        let model = AppModel(
+            client: client,
+            defaults: makeDefaults(),
+            geometryLoader: FailingGeometryLoader()
+        )
+        await model.refresh()
+        let startupErrorBeforeMap = model.startupError
+
+        await model.loadMapGeometry()
+
+        XCTAssertEqual(model.allArrivals.map(\.id), ["q"])
+        XCTAssertEqual(model.startupError, startupErrorBeforeMap)
+        XCTAssertNil(model.mapGeometry)
+        XCTAssertEqual(model.mapGeometryError, "Test geometry failed.")
+    }
+
     func testTogglingArrivalTimeDisplayChangesTheSharedBoardMode() {
         let model = AppModel(defaults: makeDefaults())
 
@@ -295,4 +381,69 @@ final class AppModelTests: XCTestCase {
             arrivalTime: time
         )
     }
+
+    private func makeTrainObservation(
+        routeID: String,
+        path: TrackPath,
+        now: Date
+    ) -> TrainObservation {
+        let next = path.anchors[1]
+        let id = TrainRunID(
+            feedID: "test-feed",
+            routeID: routeID,
+            tripID: "120000_\(path.shapeID)",
+            serviceDate: "20260722",
+            startTime: "12:00:00"
+        )
+        return TrainObservation(
+            id: id,
+            entityIDs: ["entity"],
+            directionID: path.directionIDs.first,
+            nyctDirection: .northbound,
+            destination: "Test destination",
+            isAssigned: true,
+            nyctTrainID: nil,
+            feedTimestamp: now,
+            tripUpdateTimestamp: now,
+            stops: [
+                TrainStopObservation(
+                    stopID: next.stopID,
+                    stopSequence: next.sequence,
+                    arrivalTime: now.addingTimeInterval(60),
+                    departureTime: now.addingTimeInterval(75),
+                    isSkipped: false,
+                    scheduledTrack: nil,
+                    actualTrack: nil
+                ),
+            ],
+            vehicle: nil
+        )
+    }
+}
+
+private actor SnapshotClient: SystemFeedFetching {
+    private var snapshots: [SystemFeedSnapshot]
+
+    init(snapshots: [SystemFeedSnapshot]) {
+        self.snapshots = snapshots
+    }
+
+    func fetchSystemSnapshot(catalog: StationCatalog, now: Date) async throws -> SystemFeedSnapshot {
+        guard !snapshots.isEmpty else { throw MTAFeedError.allFeedsFailed }
+        return snapshots.removeFirst()
+    }
+}
+
+private struct FixedGeometryLoader: TrackGeometryLoading {
+    let catalog: TrackGeometryCatalog
+
+    func load() throws -> TrackGeometryCatalog { catalog }
+}
+
+private struct FailingGeometryLoader: TrackGeometryLoading {
+    struct Failure: LocalizedError {
+        var errorDescription: String? { "Test geometry failed." }
+    }
+
+    func load() throws -> TrackGeometryCatalog { throw Failure() }
 }
