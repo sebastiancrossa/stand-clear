@@ -316,7 +316,7 @@ struct LiveSubwayMap: NSViewRepresentable {
         @objc private func didClickMap(_ recognizer: NSClickGestureRecognizer) {
             guard recognizer.state == .ended, let mapView else { return }
             let clickPoint = recognizer.location(in: mapView)
-            guard let hit = LiveMapPresentation.hitTest(trainGroups, at: clickPoint, radius: 18) else {
+            guard let hit = LiveMapPresentation.hitTest(trainGroups, at: clickPoint, radius: 28) else {
                 onSelectTrain(nil)
                 return
             }
@@ -974,13 +974,12 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
     ) {
         let mapUnitsPerPoint = 1 / max(zoomScale, .leastNonzeroMagnitude)
         let isSelected = snapshot.id == selectedTrainID
-        let halfWidth: CGFloat = (isSelected ? 11 : 9) * mapUnitsPerPoint
-        let halfHeight: CGFloat = (isSelected ? 16 : 14) * mapUnitsPerPoint
+        let radius = 10 * mapUnitsPerPoint
         let markerRect = CGRect(
-            x: -halfWidth,
-            y: -halfHeight,
-            width: halfWidth * 2,
-            height: halfHeight * 2
+            x: point.x - radius,
+            y: point.y - radius,
+            width: radius * 2,
+            height: radius * 2
         )
         let healthAlpha: Double = snapshot.health == .live ? 1 : 0.62
 
@@ -990,43 +989,27 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
 
         let routeColor = colorsByRouteID[snapshot.routeID]
             ?? NSColor(hexString: RouteColor.backgroundHex(for: snapshot.routeID))
-        context.saveGState()
-        context.translateBy(x: point.x, y: point.y)
         if let heading = snapshot.headingDegrees {
-            context.rotate(by: CGFloat(heading * .pi / 180))
+            let indicatorClearance = radius + ((isSelected ? 7 : 4) * mapUnitsPerPoint)
+            drawDirectionArrow(
+                headingDegrees: heading,
+                centeredAt: point,
+                clearanceRadius: indicatorClearance,
+                mapUnitsPerPoint: mapUnitsPerPoint,
+                in: context
+            )
         }
-        let bodyPath = CGPath(
-            roundedRect: markerRect,
-            cornerWidth: halfHeight,
-            cornerHeight: halfHeight,
-            transform: nil
-        )
         if isSelected {
             let selectionInset = 4 * mapUnitsPerPoint
             context.setStrokeColor(NSColor.white.withAlphaComponent(0.88).cgColor)
             context.setLineWidth(2.5 * mapUnitsPerPoint)
-            context.addPath(
-                CGPath(
-                    roundedRect: markerRect.insetBy(dx: -selectionInset, dy: -selectionInset),
-                    cornerWidth: halfHeight + selectionInset,
-                    cornerHeight: halfHeight + selectionInset,
-                    transform: nil
-                )
-            )
-            context.strokePath()
+            context.strokeEllipse(in: markerRect.insetBy(dx: -selectionInset, dy: -selectionInset))
         }
         context.setFillColor(routeColor.cgColor)
-        context.addPath(bodyPath)
-        context.fillPath()
-        context.move(to: CGPoint(x: 0, y: -halfHeight - (4 * mapUnitsPerPoint)))
-        context.addLine(to: CGPoint(x: -3.5 * mapUnitsPerPoint, y: -halfHeight + (1 * mapUnitsPerPoint)))
-        context.addLine(to: CGPoint(x: 3.5 * mapUnitsPerPoint, y: -halfHeight + (1 * mapUnitsPerPoint)))
-        context.closePath()
-        context.fillPath()
+        context.fillEllipse(in: markerRect)
         context.setStrokeColor(NSColor.black.withAlphaComponent(0.88).cgColor)
         context.setLineWidth(2.5 * mapUnitsPerPoint)
-        context.addPath(bodyPath)
-        context.strokePath()
+        context.strokeEllipse(in: markerRect)
 
         if snapshot.confidence == .low || snapshot.health != .live {
             context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
@@ -1035,22 +1018,14 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
                 phase: 0,
                 lengths: [2.5 * mapUnitsPerPoint, 2.5 * mapUnitsPerPoint]
             )
-            context.addPath(
-                CGPath(
-                    roundedRect: markerRect.insetBy(
-                        dx: -2.5 * mapUnitsPerPoint,
-                        dy: -2.5 * mapUnitsPerPoint
-                    ),
-                    cornerWidth: halfHeight + (2.5 * mapUnitsPerPoint),
-                    cornerHeight: halfHeight + (2.5 * mapUnitsPerPoint),
-                    transform: nil
+            context.strokeEllipse(
+                in: markerRect.insetBy(
+                    dx: -2.5 * mapUnitsPerPoint,
+                    dy: -2.5 * mapUnitsPerPoint
                 )
             )
-            context.strokePath()
             context.setLineDash(phase: 0, lengths: [])
         }
-
-        context.restoreGState()
 
         drawRouteGlyph(
             snapshot.routeID,
@@ -1064,30 +1039,64 @@ private final class TrainNetworkRenderer: MKOverlayRenderer {
             context.setLineWidth(2 * mapUnitsPerPoint)
             context.move(
                 to: CGPoint(
-                    x: point.x + halfWidth + (3 * mapUnitsPerPoint),
+                    x: point.x + radius + (3 * mapUnitsPerPoint),
                     y: point.y - (3 * mapUnitsPerPoint)
                 )
             )
             context.addLine(
                 to: CGPoint(
-                    x: point.x + halfWidth + (3 * mapUnitsPerPoint),
+                    x: point.x + radius + (3 * mapUnitsPerPoint),
                     y: point.y + (3 * mapUnitsPerPoint)
                 )
             )
             context.move(
                 to: CGPoint(
-                    x: point.x + halfWidth + (6 * mapUnitsPerPoint),
+                    x: point.x + radius + (6 * mapUnitsPerPoint),
                     y: point.y - (3 * mapUnitsPerPoint)
                 )
             )
             context.addLine(
                 to: CGPoint(
-                    x: point.x + halfWidth + (6 * mapUnitsPerPoint),
+                    x: point.x + radius + (6 * mapUnitsPerPoint),
                     y: point.y + (3 * mapUnitsPerPoint)
                 )
             )
             context.strokePath()
         }
+    }
+
+    private func drawDirectionArrow(
+        headingDegrees: Double,
+        centeredAt point: CGPoint,
+        clearanceRadius: CGFloat,
+        mapUnitsPerPoint: CGFloat,
+        in context: CGContext
+    ) {
+        let arrowLength = 7 * mapUnitsPerPoint
+        let arrowHalfWidth = 3.25 * mapUnitsPerPoint
+        let baseY = -clearanceRadius
+        let tipY = baseY - arrowLength
+        let arrow = CGMutablePath()
+        arrow.move(to: CGPoint(x: 0, y: baseY))
+        arrow.addLine(to: CGPoint(x: 0, y: tipY))
+        arrow.move(to: CGPoint(x: -arrowHalfWidth, y: tipY + arrowHalfWidth))
+        arrow.addLine(to: CGPoint(x: 0, y: tipY))
+        arrow.addLine(to: CGPoint(x: arrowHalfWidth, y: tipY + arrowHalfWidth))
+
+        context.saveGState()
+        defer { context.restoreGState() }
+        context.translateBy(x: point.x, y: point.y)
+        context.rotate(by: CGFloat(headingDegrees * .pi / 180))
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.addPath(arrow)
+        context.setStrokeColor(NSColor.black.withAlphaComponent(0.92).cgColor)
+        context.setLineWidth(4.5 * mapUnitsPerPoint)
+        context.strokePath()
+        context.addPath(arrow)
+        context.setStrokeColor(NSColor.white.withAlphaComponent(0.96).cgColor)
+        context.setLineWidth(2 * mapUnitsPerPoint)
+        context.strokePath()
     }
 
     private func drawCluster(
