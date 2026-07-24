@@ -8,6 +8,8 @@ struct StandClearMenuView: View {
     let mapWindowCoordinator: LiveMapWindowCoordinator
 
     var body: some View {
+        let metrics = MenuLayoutMetrics(density: model.interfaceDensity)
+
         ZStack {
             Color.black.ignoresSafeArea()
 
@@ -19,7 +21,8 @@ struct StandClearMenuView: View {
                 footer
             }
         }
-        .frame(width: 420, height: 610)
+        .frame(width: metrics.frameWidth, height: metrics.frameHeight)
+        .environment(\.menuLayoutMetrics, metrics)
         .preferredColorScheme(.dark)
         .task { model.start() }
     }
