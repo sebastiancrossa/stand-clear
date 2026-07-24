@@ -33,6 +33,16 @@ struct PinnedService: Equatable {
     }
 }
 
+enum InterfaceDensity: String, CaseIterable {
+    case standard
+    case compact
+}
+
+enum ArrivalTimeDisplayMode: String, CaseIterable {
+    case wholeMinutes
+    case minutesAndSeconds
+}
+
 struct MenuBarPresentation: Equatable {
     enum Content: Equatable {
         case icon
@@ -118,11 +128,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var feedWarning: String?
     @Published private(set) var startupError: String?
-    @Published var isChoosingLines: Bool
+    @Published var isShowingSettings = false
     @Published private(set) var selectedRoutes: Set<String>
     @Published private(set) var selectedDirections: Set<TravelDirection>
     @Published private(set) var pinnedService: PinnedService?
-    @Published private(set) var showsMinutesAndSeconds = false
+    @Published private(set) var interfaceDensity: InterfaceDensity
+    @Published private(set) var arrivalTimeDisplayMode: ArrivalTimeDisplayMode
     @Published private(set) var mapGeometry: TrackGeometryCatalog?
     @Published private(set) var mapMotionPlans: [TrainMotionPlan] = []
     @Published private(set) var mapUnplacedRouteIDs: Set<String> = []
@@ -153,6 +164,8 @@ final class AppModel: ObservableObject {
         static let selectionOnboardingVersion = "selectionOnboardingVersion"
         static let pinnedRoute = "pinnedRoute"
         static let pinnedDirection = "pinnedDirection"
+        static let interfaceDensity = "interfaceDensity"
+        static let arrivalTimeDisplayMode = "arrivalTimeDisplayMode"
     }
 
     private static let currentSelectionOnboardingVersion = 1
@@ -165,6 +178,12 @@ final class AppModel: ObservableObject {
         self.client = client
         self.defaults = defaults
         self.geometryLoader = geometryLoader
+        interfaceDensity = defaults.string(forKey: DefaultsKey.interfaceDensity)
+            .flatMap(InterfaceDensity.init(rawValue:))
+            ?? .standard
+        arrivalTimeDisplayMode = defaults.string(forKey: DefaultsKey.arrivalTimeDisplayMode)
+            .flatMap(ArrivalTimeDisplayMode.init(rawValue:))
+            ?? .wholeMinutes
         let needsSelectionOnboarding = defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
             < Self.currentSelectionOnboardingVersion
 
@@ -176,9 +195,16 @@ final class AppModel: ObservableObject {
             defaults.set([], forKey: DefaultsKey.selectedRoutes)
             defaults.set([], forKey: DefaultsKey.selectedDirections)
         } else {
-            restoredRoutes = Set(defaults.stringArray(forKey: DefaultsKey.selectedRoutes) ?? [])
+            restoredRoutes = Set(
+                (defaults.stringArray(forKey: DefaultsKey.selectedRoutes) ?? [])
+                    .map(RouteID.normalized)
+            )
             if let storedDirections = defaults.stringArray(forKey: DefaultsKey.selectedDirections) {
-                restoredDirections = Set(storedDirections.compactMap(TravelDirection.init(rawValue:)))
+                restoredDirections = Set(
+                    storedDirections
+                        .compactMap(TravelDirection.init(rawValue:))
+                        .filter(TravelDirection.selectableCases.contains)
+                )
             } else {
                 restoredDirections = []
             }
@@ -199,8 +225,6 @@ final class AppModel: ObservableObject {
             defaults.removeObject(forKey: DefaultsKey.pinnedRoute)
             defaults.removeObject(forKey: DefaultsKey.pinnedDirection)
         }
-        isChoosingLines = needsSelectionOnboarding || !defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
-
         do {
             catalog = try StationCatalog.bundled()
         } catch {
@@ -208,6 +232,7 @@ final class AppModel: ObservableObject {
             startupError = error.localizedDescription
         }
         availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
+        isShowingSettings = !hasConfiguredSelection
         mapStations = (catalog?.stations ?? []).map { station in
             let related = catalog?.relatedStations(to: station.id) ?? [station.id]
             let routes = catalog?.routes(serving: station.id) ?? []
@@ -267,6 +292,18 @@ final class AppModel: ObservableObject {
         defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
             && defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
                 >= Self.currentSelectionOnboardingVersion
+            && !selectedRoutes.intersection(availableRoutes).isEmpty
+            && !selectedDirections.intersection(TravelDirection.selectableCases).isEmpty
+    }
+
+    var showsMinutesAndSeconds: Bool {
+        arrivalTimeDisplayMode == .minutesAndSeconds
+    }
+
+    // Kept as a compatibility bridge while callers migrate to unified Settings.
+    var isChoosingLines: Bool {
+        get { isShowingSettings }
+        set { isShowingSettings = newValue }
     }
 
     func start() {
@@ -350,6 +387,12 @@ final class AppModel: ObservableObject {
     func toggleRoute(_ routeID: String) {
         let routeID = RouteID.normalized(routeID)
         if selectedRoutes.contains(routeID) {
+            if
+                hasConfiguredSelection,
+                selectedRoutes.intersection(availableRoutes) == [routeID]
+            {
+                return
+            }
             selectedRoutes.remove(routeID)
         } else {
             selectedRoutes.insert(routeID)
@@ -359,7 +402,14 @@ final class AppModel: ObservableObject {
     }
 
     func toggleDirection(_ direction: TravelDirection) {
+        guard TravelDirection.selectableCases.contains(direction) else { return }
         if selectedDirections.contains(direction) {
+            if
+                hasConfiguredSelection,
+                selectedDirections.intersection(TravelDirection.selectableCases) == [direction]
+            {
+                return
+            }
             selectedDirections.remove(direction)
         } else {
             selectedDirections.insert(direction)
@@ -385,20 +435,34 @@ final class AppModel: ObservableObject {
     }
 
     func toggleArrivalTimeDisplay() {
-        showsMinutesAndSeconds.toggle()
+        setArrivalTimeDisplayMode(
+            showsMinutesAndSeconds ? .wholeMinutes : .minutesAndSeconds
+        )
+    }
+
+    func setInterfaceDensity(_ density: InterfaceDensity) {
+        interfaceDensity = density
+        defaults.set(density.rawValue, forKey: DefaultsKey.interfaceDensity)
+    }
+
+    func setArrivalTimeDisplayMode(_ mode: ArrivalTimeDisplayMode) {
+        arrivalTimeDisplayMode = mode
+        defaults.set(mode.rawValue, forKey: DefaultsKey.arrivalTimeDisplayMode)
     }
 
     func finishChoosingLines() {
         guard
             !selectedRoutes.intersection(availableRoutes).isEmpty,
-            !selectedDirections.isEmpty
+            !selectedDirections.intersection(TravelDirection.selectableCases).isEmpty
         else { return }
+        persistSelection()
+        persistDirections()
         defaults.set(true, forKey: DefaultsKey.hasConfiguredLines)
         defaults.set(
             Self.currentSelectionOnboardingVersion,
             forKey: DefaultsKey.selectionOnboardingVersion
         )
-        isChoosingLines = false
+        isShowingSettings = false
     }
 
     func openLocationSettings() {

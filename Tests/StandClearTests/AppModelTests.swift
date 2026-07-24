@@ -133,15 +133,139 @@ final class AppModelTests: XCTestCase {
     }
 
     func testTogglingArrivalTimeDisplayChangesTheSharedBoardMode() {
-        let model = AppModel(defaults: makeDefaults())
+        let defaults = makeDefaults()
+        let model = AppModel(defaults: defaults)
 
         XCTAssertFalse(model.showsMinutesAndSeconds)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
 
         model.toggleArrivalTimeDisplay()
         XCTAssertTrue(model.showsMinutesAndSeconds)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .minutesAndSeconds)
+        XCTAssertEqual(defaults.string(forKey: "arrivalTimeDisplayMode"), "minutesAndSeconds")
 
         model.toggleArrivalTimeDisplay()
         XCTAssertFalse(model.showsMinutesAndSeconds)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
+        XCTAssertEqual(defaults.string(forKey: "arrivalTimeDisplayMode"), "wholeMinutes")
+    }
+
+    func testAppearancePreferencesDefaultAndInvalidValuesFallBackSafely() {
+        let defaults = makeDefaults()
+
+        var model = AppModel(defaults: defaults)
+
+        XCTAssertEqual(model.interfaceDensity, .standard)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
+
+        defaults.set("wallDisplay", forKey: "interfaceDensity")
+        defaults.set("tenthsOfASecond", forKey: "arrivalTimeDisplayMode")
+        model = AppModel(defaults: defaults)
+
+        XCTAssertEqual(model.interfaceDensity, .standard)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
+    }
+
+    func testAppearancePreferencesPersistAndRestore() {
+        let defaults = makeDefaults()
+        var model = AppModel(defaults: defaults)
+
+        model.setInterfaceDensity(.compact)
+        model.setArrivalTimeDisplayMode(.minutesAndSeconds)
+
+        XCTAssertEqual(defaults.string(forKey: "interfaceDensity"), "compact")
+        XCTAssertEqual(defaults.string(forKey: "arrivalTimeDisplayMode"), "minutesAndSeconds")
+
+        model = AppModel(defaults: defaults)
+
+        XCTAssertEqual(model.interfaceDensity, .compact)
+        XCTAssertEqual(model.arrivalTimeDisplayMode, .minutesAndSeconds)
+        XCTAssertTrue(model.showsMinutesAndSeconds)
+    }
+
+    func testConfiguredSelectionPreventsRemovingFinalRouteAndDirection() {
+        let defaults = makeDefaults()
+        defaults.set(["Q"], forKey: "selectedRoutes")
+        defaults.set([TravelDirection.northbound.rawValue], forKey: "selectedDirections")
+        let model = AppModel(defaults: defaults)
+
+        XCTAssertTrue(model.hasConfiguredSelection)
+
+        model.toggleRoute("Q")
+        model.toggleDirection(.northbound)
+
+        XCTAssertEqual(model.selectedRoutes, ["Q"])
+        XCTAssertEqual(model.selectedDirections, [.northbound])
+        XCTAssertEqual(defaults.stringArray(forKey: "selectedRoutes"), ["Q"])
+        XCTAssertEqual(
+            defaults.stringArray(forKey: "selectedDirections"),
+            [TravelDirection.northbound.rawValue]
+        )
+    }
+
+    func testConfiguredSelectionAllowsRemovingOneOfMultipleRoutesAndDirections() {
+        let defaults = makeDefaults()
+        defaults.set(["N", "Q"], forKey: "selectedRoutes")
+        defaults.set(
+            [TravelDirection.northbound.rawValue, TravelDirection.southbound.rawValue],
+            forKey: "selectedDirections"
+        )
+        let model = AppModel(defaults: defaults)
+
+        model.toggleRoute("Q")
+        model.toggleDirection(.northbound)
+
+        XCTAssertEqual(model.selectedRoutes, ["N"])
+        XCTAssertEqual(model.selectedDirections, [.southbound])
+        XCTAssertTrue(model.hasConfiguredSelection)
+    }
+
+    func testOnboardingAllowsSelectionsToBecomeEmptyButCannotFinish() {
+        let defaults = makeDefaults()
+        defaults.set(false, forKey: "hasConfiguredLines")
+        defaults.set(["Q"], forKey: "selectedRoutes")
+        defaults.set([TravelDirection.northbound.rawValue], forKey: "selectedDirections")
+        let model = AppModel(defaults: defaults)
+
+        XCTAssertTrue(model.isShowingSettings)
+        XCTAssertFalse(model.hasConfiguredSelection)
+
+        model.toggleRoute("Q")
+        model.toggleDirection(.northbound)
+        model.finishChoosingLines()
+
+        XCTAssertTrue(model.selectedRoutes.isEmpty)
+        XCTAssertTrue(model.selectedDirections.isEmpty)
+        XCTAssertTrue(model.isShowingSettings)
+        XCTAssertFalse(defaults.bool(forKey: "hasConfiguredLines"))
+    }
+
+    func testCorruptConfiguredDefaultsReopenOnboarding() {
+        let defaults = makeDefaults()
+        defaults.set(["NOT-A-ROUTE"], forKey: "selectedRoutes")
+        defaults.set([TravelDirection.unknown.rawValue], forKey: "selectedDirections")
+
+        let model = AppModel(defaults: defaults)
+
+        XCTAssertFalse(model.hasConfiguredSelection)
+        XCTAssertTrue(model.isShowingSettings)
+    }
+
+    func testFinishingOnboardingRecordsCompletionAndReturnsToArrivals() throws {
+        let defaults = makeDefaults()
+        defaults.set(false, forKey: "hasConfiguredLines")
+        defaults.set(0, forKey: "selectionOnboardingVersion")
+        let model = AppModel(defaults: defaults)
+        let routeID = try XCTUnwrap(model.availableRoutes.first)
+
+        model.toggleRoute(routeID)
+        model.toggleDirection(.northbound)
+        model.finishChoosingLines()
+
+        XCTAssertTrue(model.hasConfiguredSelection)
+        XCTAssertFalse(model.isShowingSettings)
+        XCTAssertTrue(defaults.bool(forKey: "hasConfiguredLines"))
+        XCTAssertEqual(defaults.integer(forKey: "selectionOnboardingVersion"), 1)
     }
 
     func testTogglingPinCreatesAndPersistsPinnedService() {
@@ -191,13 +315,14 @@ final class AppModelTests: XCTestCase {
 
     func testRemovingPinnedRouteFromFiltersClearsPin() {
         let defaults = makeDefaults()
-        defaults.set(["Q"], forKey: "selectedRoutes")
+        defaults.set(["N", "Q"], forKey: "selectedRoutes")
         defaults.set([TravelDirection.northbound.rawValue], forKey: "selectedDirections")
         let model = AppModel(defaults: defaults)
         model.togglePin(routeID: "Q", direction: .northbound)
 
         model.toggleRoute("Q")
 
+        XCTAssertEqual(model.selectedRoutes, ["N"])
         XCTAssertNil(model.pinnedService)
         XCTAssertNil(defaults.string(forKey: "pinnedRoute"))
         XCTAssertNil(defaults.string(forKey: "pinnedDirection"))
@@ -206,12 +331,16 @@ final class AppModelTests: XCTestCase {
     func testRemovingPinnedDirectionFromFiltersClearsPin() {
         let defaults = makeDefaults()
         defaults.set(["Q"], forKey: "selectedRoutes")
-        defaults.set([TravelDirection.northbound.rawValue], forKey: "selectedDirections")
+        defaults.set(
+            [TravelDirection.northbound.rawValue, TravelDirection.southbound.rawValue],
+            forKey: "selectedDirections"
+        )
         let model = AppModel(defaults: defaults)
         model.togglePin(routeID: "Q", direction: .northbound)
 
         model.toggleDirection(.northbound)
 
+        XCTAssertEqual(model.selectedDirections, [.southbound])
         XCTAssertNil(model.pinnedService)
     }
 
