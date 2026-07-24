@@ -75,7 +75,7 @@ private struct MenuHeaderView: View {
     @Environment(\.menuLayoutMetrics) private var metrics
 
     private var isOnboarding: Bool {
-        model.isShowingSettings && !model.hasConfiguredSelection
+        model.isOnboarding
     }
 
     var body: some View {
@@ -104,7 +104,7 @@ private struct MenuHeaderView: View {
             if model.isShowingSettings {
                 if !isOnboarding {
                     Button {
-                        model.isShowingSettings = false
+                        model.closeSettings()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: metrics.headerTitleFontSize, weight: .semibold))
@@ -118,7 +118,7 @@ private struct MenuHeaderView: View {
                 }
             } else if model.hasConfiguredSelection {
                 Button {
-                    model.isShowingSettings = true
+                    model.openSettings()
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: metrics.headerTitleFontSize, weight: .semibold))
@@ -268,7 +268,7 @@ private struct ArrivalListView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: metrics.frameWidth - (metrics.settingsContentPadding * 2))
                         DensityAwareActionButton(title: "Open Settings") {
-                            model.isShowingSettings = true
+                            model.openSettings()
                         }
                     }
                     .frame(maxWidth: .infinity)

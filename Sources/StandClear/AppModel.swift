@@ -43,6 +43,12 @@ enum ArrivalTimeDisplayMode: String, CaseIterable {
     case minutesAndSeconds
 }
 
+enum SettingsPresentation {
+    case hidden
+    case settings
+    case onboarding
+}
+
 struct MenuBarPresentation: Equatable {
     enum Content: Equatable {
         case icon
@@ -128,7 +134,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshing = false
     @Published private(set) var feedWarning: String?
     @Published private(set) var startupError: String?
-    @Published var isShowingSettings = false
+    @Published private(set) var settingsPresentation: SettingsPresentation = .hidden
     @Published private(set) var selectedRoutes: Set<String>
     @Published private(set) var selectedDirections: Set<TravelDirection>
     @Published private(set) var pinnedService: PinnedService?
@@ -232,7 +238,7 @@ final class AppModel: ObservableObject {
             startupError = error.localizedDescription
         }
         availableRoutes = RouteID.sorted(catalog?.allRoutes ?? [])
-        isShowingSettings = !hasConfiguredSelection
+        settingsPresentation = hasConfiguredSelection ? .hidden : .onboarding
         mapStations = (catalog?.stations ?? []).map { station in
             let related = catalog?.relatedStations(to: station.id) ?? [station.id]
             let routes = catalog?.routes(serving: station.id) ?? []
@@ -292,7 +298,11 @@ final class AppModel: ObservableObject {
         defaults.bool(forKey: DefaultsKey.hasConfiguredLines)
             && defaults.integer(forKey: DefaultsKey.selectionOnboardingVersion)
                 >= Self.currentSelectionOnboardingVersion
-            && !selectedRoutes.intersection(availableRoutes).isEmpty
+            && hasUsableSelection
+    }
+
+    var hasUsableSelection: Bool {
+        !selectedRoutes.intersection(availableRoutes).isEmpty
             && !selectedDirections.intersection(TravelDirection.selectableCases).isEmpty
     }
 
@@ -300,15 +310,23 @@ final class AppModel: ObservableObject {
         arrivalTimeDisplayMode == .minutesAndSeconds
     }
 
+    var isShowingSettings: Bool {
+        settingsPresentation != .hidden
+    }
+
+    var isOnboarding: Bool {
+        settingsPresentation == .onboarding
+    }
+
     func canToggleRoute(_ routeID: String) -> Bool {
         let routeID = RouteID.normalized(routeID)
-        guard selectedRoutes.contains(routeID), hasConfiguredSelection else { return true }
+        guard selectedRoutes.contains(routeID), !isOnboarding else { return true }
         return selectedRoutes.intersection(availableRoutes) != [routeID]
     }
 
     func canToggleDirection(_ direction: TravelDirection) -> Bool {
         guard TravelDirection.selectableCases.contains(direction) else { return false }
-        guard selectedDirections.contains(direction), hasConfiguredSelection else { return true }
+        guard selectedDirections.contains(direction), !isOnboarding else { return true }
         return selectedDirections.intersection(TravelDirection.selectableCases) != [direction]
     }
 
@@ -437,28 +455,34 @@ final class AppModel: ObservableObject {
     }
 
     func setInterfaceDensity(_ density: InterfaceDensity) {
+        guard interfaceDensity != density else { return }
         interfaceDensity = density
         defaults.set(density.rawValue, forKey: DefaultsKey.interfaceDensity)
     }
 
     func setArrivalTimeDisplayMode(_ mode: ArrivalTimeDisplayMode) {
+        guard arrivalTimeDisplayMode != mode else { return }
         arrivalTimeDisplayMode = mode
         defaults.set(mode.rawValue, forKey: DefaultsKey.arrivalTimeDisplayMode)
     }
 
+    func openSettings() {
+        settingsPresentation = hasConfiguredSelection ? .settings : .onboarding
+    }
+
+    func closeSettings() {
+        guard settingsPresentation == .settings else { return }
+        settingsPresentation = .hidden
+    }
+
     func finishChoosingLines() {
-        guard
-            !selectedRoutes.intersection(availableRoutes).isEmpty,
-            !selectedDirections.intersection(TravelDirection.selectableCases).isEmpty
-        else { return }
-        persistSelection()
-        persistDirections()
+        guard hasUsableSelection else { return }
         defaults.set(true, forKey: DefaultsKey.hasConfiguredLines)
         defaults.set(
             Self.currentSelectionOnboardingVersion,
             forKey: DefaultsKey.selectionOnboardingVersion
         )
-        isShowingSettings = false
+        settingsPresentation = .hidden
     }
 
     func openLocationSettings() {

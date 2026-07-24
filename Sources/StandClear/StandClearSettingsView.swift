@@ -6,12 +6,7 @@ struct StandClearSettingsView: View {
     @Environment(\.menuLayoutMetrics) private var metrics
 
     private var isOnboarding: Bool {
-        !model.hasConfiguredSelection
-    }
-
-    private var canShowArrivals: Bool {
-        !model.selectedRoutes.intersection(model.availableRoutes).isEmpty
-            && !model.selectedDirections.intersection(TravelDirection.selectableCases).isEmpty
+        model.isOnboarding
     }
 
     private var compactLayout: Binding<Bool> {
@@ -191,8 +186,8 @@ struct StandClearSettingsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
-        .disabled(!canShowArrivals)
-        .opacity(canShowArrivals ? 1 : 0.35)
+        .disabled(!model.hasUsableSelection)
+        .opacity(model.hasUsableSelection ? 1 : 0.35)
         .keyboardShortcut(.defaultAction)
         .accessibilityHint("Select at least one direction and one line to continue.")
     }

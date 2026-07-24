@@ -247,15 +247,32 @@ final class AppModelTests: XCTestCase {
         XCTAssertFalse(defaults.bool(forKey: "hasConfiguredLines"))
     }
 
-    func testCorruptConfiguredDefaultsReopenOnboarding() {
+    func testCorruptConfiguredDefaultsRemainInOnboardingUntilFinished() throws {
         let defaults = makeDefaults()
         defaults.set(["NOT-A-ROUTE"], forKey: "selectedRoutes")
         defaults.set([TravelDirection.unknown.rawValue], forKey: "selectedDirections")
 
         let model = AppModel(defaults: defaults)
+        let routeID = try XCTUnwrap(model.availableRoutes.first)
 
         XCTAssertFalse(model.hasConfiguredSelection)
         XCTAssertTrue(model.isShowingSettings)
+        XCTAssertTrue(model.isOnboarding)
+
+        model.toggleRoute(routeID)
+        model.toggleDirection(.northbound)
+
+        XCTAssertTrue(model.hasConfiguredSelection)
+        XCTAssertTrue(model.isShowingSettings)
+        XCTAssertTrue(model.isOnboarding)
+        XCTAssertTrue(model.canToggleRoute(routeID))
+        XCTAssertTrue(model.canToggleDirection(.northbound))
+
+        model.toggleRoute(routeID)
+        model.toggleDirection(.northbound)
+
+        XCTAssertFalse(model.hasUsableSelection)
+        XCTAssertTrue(model.isOnboarding)
     }
 
     func testFinishingOnboardingRecordsCompletionAndReturnsToArrivals() throws {
@@ -271,6 +288,7 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertTrue(model.hasConfiguredSelection)
         XCTAssertFalse(model.isShowingSettings)
+        XCTAssertFalse(model.isOnboarding)
         XCTAssertTrue(defaults.bool(forKey: "hasConfiguredLines"))
         XCTAssertEqual(defaults.integer(forKey: "selectionOnboardingVersion"), 1)
     }
