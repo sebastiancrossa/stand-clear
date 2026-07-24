@@ -190,6 +190,8 @@ final class AppModelTests: XCTestCase {
         let model = AppModel(defaults: defaults)
 
         XCTAssertTrue(model.hasConfiguredSelection)
+        XCTAssertFalse(model.canToggleRoute("Q"))
+        XCTAssertFalse(model.canToggleDirection(.northbound))
 
         model.toggleRoute("Q")
         model.toggleDirection(.northbound)
@@ -212,6 +214,9 @@ final class AppModelTests: XCTestCase {
         )
         let model = AppModel(defaults: defaults)
 
+        XCTAssertTrue(model.canToggleRoute("Q"))
+        XCTAssertTrue(model.canToggleDirection(.northbound))
+
         model.toggleRoute("Q")
         model.toggleDirection(.northbound)
 
@@ -229,6 +234,8 @@ final class AppModelTests: XCTestCase {
 
         XCTAssertTrue(model.isShowingSettings)
         XCTAssertFalse(model.hasConfiguredSelection)
+        XCTAssertTrue(model.canToggleRoute("Q"))
+        XCTAssertTrue(model.canToggleDirection(.northbound))
 
         model.toggleRoute("Q")
         model.toggleDirection(.northbound)

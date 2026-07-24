@@ -300,10 +300,16 @@ final class AppModel: ObservableObject {
         arrivalTimeDisplayMode == .minutesAndSeconds
     }
 
-    // Kept as a compatibility bridge while callers migrate to unified Settings.
-    var isChoosingLines: Bool {
-        get { isShowingSettings }
-        set { isShowingSettings = newValue }
+    func canToggleRoute(_ routeID: String) -> Bool {
+        let routeID = RouteID.normalized(routeID)
+        guard selectedRoutes.contains(routeID), hasConfiguredSelection else { return true }
+        return selectedRoutes.intersection(availableRoutes) != [routeID]
+    }
+
+    func canToggleDirection(_ direction: TravelDirection) -> Bool {
+        guard TravelDirection.selectableCases.contains(direction) else { return false }
+        guard selectedDirections.contains(direction), hasConfiguredSelection else { return true }
+        return selectedDirections.intersection(TravelDirection.selectableCases) != [direction]
     }
 
     func start() {
@@ -387,12 +393,7 @@ final class AppModel: ObservableObject {
     func toggleRoute(_ routeID: String) {
         let routeID = RouteID.normalized(routeID)
         if selectedRoutes.contains(routeID) {
-            if
-                hasConfiguredSelection,
-                selectedRoutes.intersection(availableRoutes) == [routeID]
-            {
-                return
-            }
+            guard canToggleRoute(routeID) else { return }
             selectedRoutes.remove(routeID)
         } else {
             selectedRoutes.insert(routeID)
@@ -404,12 +405,7 @@ final class AppModel: ObservableObject {
     func toggleDirection(_ direction: TravelDirection) {
         guard TravelDirection.selectableCases.contains(direction) else { return }
         if selectedDirections.contains(direction) {
-            if
-                hasConfiguredSelection,
-                selectedDirections.intersection(TravelDirection.selectableCases) == [direction]
-            {
-                return
-            }
+            guard canToggleDirection(direction) else { return }
             selectedDirections.remove(direction)
         } else {
             selectedDirections.insert(direction)

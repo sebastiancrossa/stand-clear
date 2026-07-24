@@ -17,7 +17,6 @@ struct MenuLayoutMetrics: Equatable {
     let footerItemSpacing: CGFloat
     let footerFontSize: CGFloat
 
-    let outerHorizontalPadding: CGFloat
     let sectionHorizontalPadding: CGFloat
     let sectionTopPadding: CGFloat
     let sectionBottomPadding: CGFloat
@@ -29,6 +28,7 @@ struct MenuLayoutMetrics: Equatable {
     let arrivalRowHorizontalPadding: CGFloat
     let arrivalRowVerticalPadding: CGFloat
     let arrivalRowItemSpacing: CGFloat
+    let arrivalTextSpacing: CGFloat
     let arrivalRouteBulletSize: CGFloat
     let arrivalDirectionArrowFontSize: CGFloat
     let arrivalDirectionArrowColumnWidth: CGFloat
@@ -55,6 +55,20 @@ struct MenuLayoutMetrics: Equatable {
     let settingsCTAHeight: CGFloat
     let settingsCTAFontSize: CGFloat
 
+    let emptyStateSpacing: CGFloat
+    let emptyStateIconFontSize: CGFloat
+    let emptyStateTitleFontSize: CGFloat
+    let emptyStateBodyFontSize: CGFloat
+    let emptyStateTopPadding: CGFloat
+
+    let statusSpacing: CGFloat
+    let statusIconFontSize: CGFloat
+    let statusTitleFontSize: CGFloat
+    let statusBodyFontSize: CGFloat
+    let statusContentPadding: CGFloat
+    let statusMaxWidth: CGFloat
+    let statusUsesProminentActions: Bool
+
     init(density: InterfaceDensity) {
         switch density {
         case .standard:
@@ -62,7 +76,7 @@ struct MenuLayoutMetrics: Equatable {
                 frameWidth: 420,
                 frameHeight: 610,
                 dividerThickness: 1,
-                headerHeight: 60,
+                headerHeight: 62,
                 headerHorizontalPadding: 18,
                 headerVerticalPadding: 14,
                 headerItemSpacing: 12,
@@ -72,17 +86,17 @@ struct MenuLayoutMetrics: Equatable {
                 footerHorizontalPadding: 18,
                 footerItemSpacing: 12,
                 footerFontSize: 12,
-                outerHorizontalPadding: 18,
                 sectionHorizontalPadding: 18,
                 sectionTopPadding: 18,
                 sectionBottomPadding: 6,
                 sectionSpacing: 12,
-                directionHeaderHeight: 36,
+                directionHeaderHeight: 38,
                 directionHeaderFontSize: 11,
-                arrivalRowHeight: 70,
+                arrivalRowHeight: 72,
                 arrivalRowHorizontalPadding: 18,
                 arrivalRowVerticalPadding: 12,
                 arrivalRowItemSpacing: 12,
+                arrivalTextSpacing: 4,
                 arrivalRouteBulletSize: 46,
                 arrivalDirectionArrowFontSize: 38,
                 arrivalDirectionArrowColumnWidth: 34,
@@ -106,7 +120,19 @@ struct MenuLayoutMetrics: Equatable {
                 settingsRouteRowSpacing: 12,
                 settingsRouteItemSpacing: 14,
                 settingsCTAHeight: 48,
-                settingsCTAFontSize: 16
+                settingsCTAFontSize: 16,
+                emptyStateSpacing: 12,
+                emptyStateIconFontSize: 30,
+                emptyStateTitleFontSize: 13,
+                emptyStateBodyFontSize: 13,
+                emptyStateTopPadding: 110,
+                statusSpacing: 16,
+                statusIconFontSize: 34,
+                statusTitleFontSize: 20,
+                statusBodyFontSize: 13,
+                statusContentPadding: 32,
+                statusMaxWidth: 300,
+                statusUsesProminentActions: true
             )
         case .compact:
             self = Self(
@@ -123,7 +149,6 @@ struct MenuLayoutMetrics: Equatable {
                 footerHorizontalPadding: 12,
                 footerItemSpacing: 8,
                 footerFontSize: 10,
-                outerHorizontalPadding: 12,
                 sectionHorizontalPadding: 12,
                 sectionTopPadding: 8,
                 sectionBottomPadding: 4,
@@ -132,8 +157,9 @@ struct MenuLayoutMetrics: Equatable {
                 directionHeaderFontSize: 10,
                 arrivalRowHeight: 44,
                 arrivalRowHorizontalPadding: 12,
-                arrivalRowVerticalPadding: 6,
+                arrivalRowVerticalPadding: 4,
                 arrivalRowItemSpacing: 8,
+                arrivalTextSpacing: 2,
                 arrivalRouteBulletSize: 32,
                 arrivalDirectionArrowFontSize: 26,
                 arrivalDirectionArrowColumnWidth: 24,
@@ -157,7 +183,19 @@ struct MenuLayoutMetrics: Equatable {
                 settingsRouteRowSpacing: 8,
                 settingsRouteItemSpacing: 10,
                 settingsCTAHeight: 40,
-                settingsCTAFontSize: 13
+                settingsCTAFontSize: 13,
+                emptyStateSpacing: 8,
+                emptyStateIconFontSize: 26,
+                emptyStateTitleFontSize: 15,
+                emptyStateBodyFontSize: 11,
+                emptyStateTopPadding: 0,
+                statusSpacing: 8,
+                statusIconFontSize: 28,
+                statusTitleFontSize: 15,
+                statusBodyFontSize: 11,
+                statusContentPadding: 14,
+                statusMaxWidth: 312,
+                statusUsesProminentActions: false
             )
         }
     }
@@ -176,7 +214,6 @@ struct MenuLayoutMetrics: Equatable {
         footerHorizontalPadding: CGFloat,
         footerItemSpacing: CGFloat,
         footerFontSize: CGFloat,
-        outerHorizontalPadding: CGFloat,
         sectionHorizontalPadding: CGFloat,
         sectionTopPadding: CGFloat,
         sectionBottomPadding: CGFloat,
@@ -187,6 +224,7 @@ struct MenuLayoutMetrics: Equatable {
         arrivalRowHorizontalPadding: CGFloat,
         arrivalRowVerticalPadding: CGFloat,
         arrivalRowItemSpacing: CGFloat,
+        arrivalTextSpacing: CGFloat,
         arrivalRouteBulletSize: CGFloat,
         arrivalDirectionArrowFontSize: CGFloat,
         arrivalDirectionArrowColumnWidth: CGFloat,
@@ -210,7 +248,19 @@ struct MenuLayoutMetrics: Equatable {
         settingsRouteRowSpacing: CGFloat,
         settingsRouteItemSpacing: CGFloat,
         settingsCTAHeight: CGFloat,
-        settingsCTAFontSize: CGFloat
+        settingsCTAFontSize: CGFloat,
+        emptyStateSpacing: CGFloat,
+        emptyStateIconFontSize: CGFloat,
+        emptyStateTitleFontSize: CGFloat,
+        emptyStateBodyFontSize: CGFloat,
+        emptyStateTopPadding: CGFloat,
+        statusSpacing: CGFloat,
+        statusIconFontSize: CGFloat,
+        statusTitleFontSize: CGFloat,
+        statusBodyFontSize: CGFloat,
+        statusContentPadding: CGFloat,
+        statusMaxWidth: CGFloat,
+        statusUsesProminentActions: Bool
     ) {
         self.frameWidth = frameWidth
         self.frameHeight = frameHeight
@@ -225,7 +275,6 @@ struct MenuLayoutMetrics: Equatable {
         self.footerHorizontalPadding = footerHorizontalPadding
         self.footerItemSpacing = footerItemSpacing
         self.footerFontSize = footerFontSize
-        self.outerHorizontalPadding = outerHorizontalPadding
         self.sectionHorizontalPadding = sectionHorizontalPadding
         self.sectionTopPadding = sectionTopPadding
         self.sectionBottomPadding = sectionBottomPadding
@@ -236,6 +285,7 @@ struct MenuLayoutMetrics: Equatable {
         self.arrivalRowHorizontalPadding = arrivalRowHorizontalPadding
         self.arrivalRowVerticalPadding = arrivalRowVerticalPadding
         self.arrivalRowItemSpacing = arrivalRowItemSpacing
+        self.arrivalTextSpacing = arrivalTextSpacing
         self.arrivalRouteBulletSize = arrivalRouteBulletSize
         self.arrivalDirectionArrowFontSize = arrivalDirectionArrowFontSize
         self.arrivalDirectionArrowColumnWidth = arrivalDirectionArrowColumnWidth
@@ -260,14 +310,26 @@ struct MenuLayoutMetrics: Equatable {
         self.settingsRouteItemSpacing = settingsRouteItemSpacing
         self.settingsCTAHeight = settingsCTAHeight
         self.settingsCTAFontSize = settingsCTAFontSize
+        self.emptyStateSpacing = emptyStateSpacing
+        self.emptyStateIconFontSize = emptyStateIconFontSize
+        self.emptyStateTitleFontSize = emptyStateTitleFontSize
+        self.emptyStateBodyFontSize = emptyStateBodyFontSize
+        self.emptyStateTopPadding = emptyStateTopPadding
+        self.statusSpacing = statusSpacing
+        self.statusIconFontSize = statusIconFontSize
+        self.statusTitleFontSize = statusTitleFontSize
+        self.statusBodyFontSize = statusBodyFontSize
+        self.statusContentPadding = statusContentPadding
+        self.statusMaxWidth = statusMaxWidth
+        self.statusUsesProminentActions = statusUsesProminentActions
     }
 
     var normalArrivalContentHeight: CGFloat {
-        frameHeight
-            - headerHeight
-            - footerHeight
-            - (dividerThickness * 2)
-            - directionHeaderHeight
+        menuContentHeight - directionHeaderHeight
+    }
+
+    var menuContentHeight: CGFloat {
+        frameHeight - headerHeight - footerHeight - (dividerThickness * 2)
     }
 
     var normalArrivalCapacity: Int {

@@ -7,6 +7,8 @@ final class MenuLayoutMetricsTests: XCTestCase {
 
         XCTAssertEqual(metrics.frameWidth, 420)
         XCTAssertEqual(metrics.frameHeight, 610)
+        XCTAssertEqual(metrics.headerHeight, 62)
+        XCTAssertEqual(metrics.arrivalRowHeight, 72)
     }
 
     func testCompactProfileUsesRequestedMenuSize() {
@@ -14,6 +16,18 @@ final class MenuLayoutMetricsTests: XCTestCase {
 
         XCTAssertEqual(metrics.frameWidth, 340)
         XCTAssertEqual(metrics.frameHeight, 480)
+        XCTAssertEqual(metrics.headerHeight, 50)
+        XCTAssertEqual(metrics.footerHeight, 36)
+        XCTAssertEqual(metrics.arrivalRouteBulletSize, 32)
+        XCTAssertEqual(metrics.arrivalDirectionArrowFontSize, 26)
+        XCTAssertEqual(metrics.arrivalDirectionArrowColumnWidth, 24)
+        XCTAssertEqual(metrics.arrivalDestinationFontSize, 11)
+        XCTAssertEqual(metrics.arrivalStatusFontSize, 8)
+        XCTAssertEqual(metrics.arrivalPinHeight, 36)
+        XCTAssertEqual(metrics.arrivalETAHeight, 36)
+        XCTAssertEqual(metrics.arrivalRowItemSpacing, 8)
+        XCTAssertEqual(metrics.arrivalTextSpacing, 2)
+        XCTAssertTrue((12 ... 14).contains(metrics.arrivalRowHorizontalPadding))
     }
 
     func testCompactProfileFitsEightNormalArrivalRows() {
@@ -35,8 +49,9 @@ final class MenuLayoutMetricsTests: XCTestCase {
         let pairedMetrics: [(compact: CGFloat, standard: CGFloat)] = [
             (compact.headerHeight, standard.headerHeight),
             (compact.footerHeight, standard.footerHeight),
-            (compact.outerHorizontalPadding, standard.outerHorizontalPadding),
+            (compact.sectionHorizontalPadding, standard.sectionHorizontalPadding),
             (compact.arrivalRowHeight, standard.arrivalRowHeight),
+            (compact.arrivalTextSpacing, standard.arrivalTextSpacing),
             (compact.arrivalRouteBulletSize, standard.arrivalRouteBulletSize),
             (compact.arrivalDirectionArrowFontSize, standard.arrivalDirectionArrowFontSize),
             (compact.arrivalDestinationFontSize, standard.arrivalDestinationFontSize),
