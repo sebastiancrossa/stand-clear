@@ -59,7 +59,6 @@ struct MenuLayoutMetrics: Equatable {
     let emptyStateIconFontSize: CGFloat
     let emptyStateTitleFontSize: CGFloat
     let emptyStateBodyFontSize: CGFloat
-    let emptyStateTopPadding: CGFloat
 
     let statusSpacing: CGFloat
     let statusIconFontSize: CGFloat
@@ -67,133 +66,66 @@ struct MenuLayoutMetrics: Equatable {
     let statusBodyFontSize: CGFloat
     let statusContentPadding: CGFloat
     let statusMaxWidth: CGFloat
-    let statusUsesProminentActions: Bool
 
-    init(density: InterfaceDensity) {
-        switch density {
-        case .standard:
-            frameWidth = 420
-            frameHeight = 610
-            dividerThickness = 1
-            headerHeight = 62
-            headerHorizontalPadding = 18
-            headerVerticalPadding = 14
-            headerItemSpacing = 12
-            headerTitleFontSize = 15
-            headerSubtitleFontSize = 10
-            footerHeight = 44
-            footerHorizontalPadding = 18
-            footerItemSpacing = 12
-            footerFontSize = 12
-            sectionHorizontalPadding = 18
-            sectionTopPadding = 18
-            sectionBottomPadding = 6
-            sectionSpacing = 12
-            directionHeaderHeight = 38
-            directionHeaderFontSize = 11
-            arrivalRowHeight = 72
-            arrivalRowHorizontalPadding = 18
-            arrivalRowVerticalPadding = 12
-            arrivalRowItemSpacing = 12
-            arrivalTextSpacing = 4
-            arrivalRouteBulletSize = 46
-            arrivalDirectionArrowFontSize = 38
-            arrivalDirectionArrowColumnWidth = 34
-            arrivalDestinationFontSize = 13
-            arrivalStatusFontSize = 9
-            arrivalPinFontSize = 14
-            arrivalPinWidth = 30
-            arrivalPinHeight = 48
-            arrivalETAFontSize = 24
-            arrivalETAMinWidth = 86
-            arrivalETAHeight = 48
-            settingsContentPadding = 24
-            settingsSectionSpacing = 20
-            settingsItemSpacing = 12
-            settingsTitleFontSize = 18
-            settingsBodyFontSize = 13
-            settingsDirectionButtonHeight = 76
-            settingsDirectionArrowFontSize = 26
-            settingsDirectionLabelFontSize = 9
-            settingsRouteBulletSize = 54
-            settingsRouteRowSpacing = 12
-            settingsRouteItemSpacing = 14
-            settingsCTAHeight = 48
-            settingsCTAFontSize = 16
-            emptyStateSpacing = 12
-            emptyStateIconFontSize = 30
-            emptyStateTitleFontSize = 13
-            emptyStateBodyFontSize = 13
-            emptyStateTopPadding = 110
-            statusSpacing = 16
-            statusIconFontSize = 34
-            statusTitleFontSize = 20
-            statusBodyFontSize = 13
-            statusContentPadding = 32
-            statusMaxWidth = 300
-            statusUsesProminentActions = true
-        case .compact:
-            frameWidth = 340
-            frameHeight = 480
-            dividerThickness = 1
-            headerHeight = 50
-            headerHorizontalPadding = 12
-            headerVerticalPadding = 9
-            headerItemSpacing = 8
-            headerTitleFontSize = 13
-            headerSubtitleFontSize = 8
-            footerHeight = 36
-            footerHorizontalPadding = 12
-            footerItemSpacing = 8
-            footerFontSize = 10
-            sectionHorizontalPadding = 12
-            sectionTopPadding = 8
-            sectionBottomPadding = 4
-            sectionSpacing = 8
-            directionHeaderHeight = 28
-            directionHeaderFontSize = 10
-            arrivalRowHeight = 44
-            arrivalRowHorizontalPadding = 12
-            arrivalRowVerticalPadding = 4
-            arrivalRowItemSpacing = 8
-            arrivalTextSpacing = 2
-            arrivalRouteBulletSize = 32
-            arrivalDirectionArrowFontSize = 26
-            arrivalDirectionArrowColumnWidth = 24
-            arrivalDestinationFontSize = 11
-            arrivalStatusFontSize = 8
-            arrivalPinFontSize = 12
-            arrivalPinWidth = 26
-            arrivalPinHeight = 36
-            arrivalETAFontSize = 18
-            arrivalETAMinWidth = 62
-            arrivalETAHeight = 36
-            settingsContentPadding = 14
-            settingsSectionSpacing = 14
-            settingsItemSpacing = 8
-            settingsTitleFontSize = 15
-            settingsBodyFontSize = 11
-            settingsDirectionButtonHeight = 56
-            settingsDirectionArrowFontSize = 20
-            settingsDirectionLabelFontSize = 8
-            settingsRouteBulletSize = 38
-            settingsRouteRowSpacing = 8
-            settingsRouteItemSpacing = 10
-            settingsCTAHeight = 40
-            settingsCTAFontSize = 13
-            emptyStateSpacing = 8
-            emptyStateIconFontSize = 26
-            emptyStateTitleFontSize = 15
-            emptyStateBodyFontSize = 11
-            emptyStateTopPadding = 0
-            statusSpacing = 8
-            statusIconFontSize = 28
-            statusTitleFontSize = 15
-            statusBodyFontSize = 11
-            statusContentPadding = 14
-            statusMaxWidth = 312
-            statusUsesProminentActions = false
-        }
+    init() {
+        frameWidth = 340
+        frameHeight = 480
+        dividerThickness = 1
+        headerHeight = 50
+        headerHorizontalPadding = 12
+        headerVerticalPadding = 9
+        headerItemSpacing = 8
+        headerTitleFontSize = 13
+        headerSubtitleFontSize = 8
+        footerHeight = 36
+        footerHorizontalPadding = 12
+        footerItemSpacing = 8
+        footerFontSize = 10
+        sectionHorizontalPadding = 12
+        sectionTopPadding = 8
+        sectionBottomPadding = 4
+        sectionSpacing = 8
+        directionHeaderHeight = 28
+        directionHeaderFontSize = 10
+        arrivalRowHeight = 44
+        arrivalRowHorizontalPadding = 12
+        arrivalRowVerticalPadding = 4
+        arrivalRowItemSpacing = 8
+        arrivalTextSpacing = 2
+        arrivalRouteBulletSize = 32
+        arrivalDirectionArrowFontSize = 26
+        arrivalDirectionArrowColumnWidth = 24
+        arrivalDestinationFontSize = 11
+        arrivalStatusFontSize = 8
+        arrivalPinFontSize = 12
+        arrivalPinWidth = 26
+        arrivalPinHeight = 36
+        arrivalETAFontSize = 18
+        arrivalETAMinWidth = 62
+        arrivalETAHeight = 36
+        settingsContentPadding = 14
+        settingsSectionSpacing = 14
+        settingsItemSpacing = 8
+        settingsTitleFontSize = 15
+        settingsBodyFontSize = 11
+        settingsDirectionButtonHeight = 56
+        settingsDirectionArrowFontSize = 20
+        settingsDirectionLabelFontSize = 8
+        settingsRouteBulletSize = 38
+        settingsRouteRowSpacing = 8
+        settingsRouteItemSpacing = 10
+        settingsCTAHeight = 40
+        settingsCTAFontSize = 13
+        emptyStateSpacing = 8
+        emptyStateIconFontSize = 26
+        emptyStateTitleFontSize = 15
+        emptyStateBodyFontSize = 11
+        statusSpacing = 8
+        statusIconFontSize = 28
+        statusTitleFontSize = 15
+        statusBodyFontSize = 11
+        statusContentPadding = 14
+        statusMaxWidth = 312
     }
 
     var normalArrivalContentHeight: CGFloat {
@@ -210,7 +142,7 @@ struct MenuLayoutMetrics: Equatable {
 }
 
 private struct MenuLayoutMetricsKey: EnvironmentKey {
-    static let defaultValue = MenuLayoutMetrics(density: .standard)
+    static let defaultValue = MenuLayoutMetrics()
 }
 
 extension EnvironmentValues {

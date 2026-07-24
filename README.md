@@ -27,7 +27,7 @@ On first launch, the app opens directly to a unified Settings panel with every d
 
 The app refreshes live arrival data every 30 seconds. By default, the menu bar shows the train icon; click it to open the full board. The gear in the board header opens Settings even when location is unavailable.
 
-Settings offers two persisted menu layouts. **Standard** is the default and retains the 420×610 presentation. **Compact** uses a 340×480 frame with smaller menu chrome and 44-point arrival rows, fitting at least eight complete arrivals below one direction heading when no feed warning is present. Density applies to the menu interface, Settings, onboarding, and status states; it does not change the Live Map or menu-bar countdown.
+The menu uses a single 340×480 frame with compact chrome and 44-point arrival rows, fitting at least eight complete arrivals below one direction heading when no feed warning is present. The same layout carries through Settings, onboarding, and status states; the Live Map and menu-bar countdown have their own sizing.
 
 Use the pin beside an arrival to keep that route and direction in the menu bar as a live minutes-and-seconds countdown, such as `Q ↑ 4:24`. One pin is supported at a time and is remembered across launches. It follows the nearest station, advances to the next matching train at zero, and shows `--:--` when no upcoming arrival is available. Pinning another service replaces the current pin; use the active row pin or the footer’s unpin button to remove it. Removing the pinned route or direction from the filters also clears the pin.
 

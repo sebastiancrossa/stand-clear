@@ -9,13 +9,6 @@ struct StandClearSettingsView: View {
         model.isOnboarding
     }
 
-    private var compactLayout: Binding<Bool> {
-        Binding(
-            get: { model.interfaceDensity == .compact },
-            set: { model.setInterfaceDensity($0 ? .compact : .standard) }
-        )
-    }
-
     private var arrivalTimeMode: Binding<ArrivalTimeDisplayMode> {
         Binding(
             get: { model.arrivalTimeDisplayMode },
@@ -42,22 +35,6 @@ struct StandClearSettingsView: View {
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: metrics.settingsItemSpacing) {
             sectionHeading("APPEARANCE")
-
-            Toggle(isOn: compactLayout) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Compact layout")
-                        .font(.system(
-                            size: metrics.settingsBodyFontSize,
-                            weight: .semibold,
-                            design: .rounded
-                        ))
-                    Text("Show more arrivals in a smaller menu.")
-                        .font(.system(size: metrics.settingsBodyFontSize))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .toggleStyle(.switch)
-            .accessibilityHint("Changes the menu size and spacing immediately.")
 
             VStack(alignment: .leading, spacing: metrics.settingsItemSpacing / 2) {
                 Text("ARRIVAL TIMES")

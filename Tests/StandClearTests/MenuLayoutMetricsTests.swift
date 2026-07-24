@@ -2,17 +2,8 @@
 import XCTest
 
 final class MenuLayoutMetricsTests: XCTestCase {
-    func testStandardProfilePreservesCurrentMenuSize() {
-        let metrics = MenuLayoutMetrics(density: .standard)
-
-        XCTAssertEqual(metrics.frameWidth, 420)
-        XCTAssertEqual(metrics.frameHeight, 610)
-        XCTAssertEqual(metrics.headerHeight, 62)
-        XCTAssertEqual(metrics.arrivalRowHeight, 72)
-    }
-
-    func testCompactProfileUsesRequestedMenuSize() {
-        let metrics = MenuLayoutMetrics(density: .compact)
+    func testMenuMetricsUseExpectedMenuSize() {
+        let metrics = MenuLayoutMetrics()
 
         XCTAssertEqual(metrics.frameWidth, 340)
         XCTAssertEqual(metrics.frameHeight, 480)
@@ -30,8 +21,8 @@ final class MenuLayoutMetricsTests: XCTestCase {
         XCTAssertTrue((12 ... 14).contains(metrics.arrivalRowHorizontalPadding))
     }
 
-    func testCompactProfileFitsEightNormalArrivalRows() {
-        let metrics = MenuLayoutMetrics(density: .compact)
+    func testMenuMetricsFitEightNormalArrivalRows() {
+        let metrics = MenuLayoutMetrics()
 
         XCTAssertLessThanOrEqual(metrics.directionHeaderHeight, 28)
         XCTAssertLessThanOrEqual(metrics.arrivalRowHeight, 44)
@@ -42,30 +33,28 @@ final class MenuLayoutMetricsTests: XCTestCase {
         )
     }
 
-    func testCompactProfileUsesPositiveSmallerDensityMetrics() {
-        let standard = MenuLayoutMetrics(density: .standard)
-        let compact = MenuLayoutMetrics(density: .compact)
+    func testMenuMetricsAreAllPositive() {
+        let metrics = MenuLayoutMetrics()
 
-        let pairedMetrics: [(compact: CGFloat, standard: CGFloat)] = [
-            (compact.headerHeight, standard.headerHeight),
-            (compact.footerHeight, standard.footerHeight),
-            (compact.sectionHorizontalPadding, standard.sectionHorizontalPadding),
-            (compact.arrivalRowHeight, standard.arrivalRowHeight),
-            (compact.arrivalTextSpacing, standard.arrivalTextSpacing),
-            (compact.arrivalRouteBulletSize, standard.arrivalRouteBulletSize),
-            (compact.arrivalDirectionArrowFontSize, standard.arrivalDirectionArrowFontSize),
-            (compact.arrivalDestinationFontSize, standard.arrivalDestinationFontSize),
-            (compact.arrivalStatusFontSize, standard.arrivalStatusFontSize),
-            (compact.arrivalPinHeight, standard.arrivalPinHeight),
-            (compact.arrivalETAFontSize, standard.arrivalETAFontSize),
-            (compact.settingsDirectionButtonHeight, standard.settingsDirectionButtonHeight),
-            (compact.settingsRouteBulletSize, standard.settingsRouteBulletSize),
-            (compact.settingsCTAHeight, standard.settingsCTAHeight),
+        let sizedMetrics: [CGFloat] = [
+            metrics.headerHeight,
+            metrics.footerHeight,
+            metrics.sectionHorizontalPadding,
+            metrics.arrivalRowHeight,
+            metrics.arrivalTextSpacing,
+            metrics.arrivalRouteBulletSize,
+            metrics.arrivalDirectionArrowFontSize,
+            metrics.arrivalDestinationFontSize,
+            metrics.arrivalStatusFontSize,
+            metrics.arrivalPinHeight,
+            metrics.arrivalETAFontSize,
+            metrics.settingsDirectionButtonHeight,
+            metrics.settingsRouteBulletSize,
+            metrics.settingsCTAHeight,
         ]
 
-        for pair in pairedMetrics {
-            XCTAssertGreaterThan(pair.compact, 0)
-            XCTAssertLessThan(pair.compact, pair.standard)
+        for value in sizedMetrics {
+            XCTAssertGreaterThan(value, 0)
         }
     }
 }

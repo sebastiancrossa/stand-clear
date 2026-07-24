@@ -16,10 +16,10 @@ Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a
 - Let the user choose from the complete subway route catalog and remember which lines appear.
 - Prevent removing the last selected route or direction after onboarding.
 - Keep Settings accessible from a header gear even when location is unavailable.
-- Default to a 420×610 Standard menu and offer a persisted 340×480 Compact menu.
-- Fit at least eight complete 44-point arrival rows beneath one direction header in Compact mode when no feed warning is present.
-- Keep route bullets, direction arrows, single-line truncated destinations, real-time labels, pin controls, and ETAs in Compact rows.
-- Expose the full destination through pointer help and accessibility text when Compact truncates it.
+- Present the menu in a single 340×480 frame.
+- Fit at least eight complete 44-point arrival rows beneath one direction header when no feed warning is present.
+- Keep route bullets, direction arrows, single-line truncated destinations, real-time labels, pin controls, and ETAs in arrival rows.
+- Expose the full destination through pointer help and accessibility text when a row truncates it.
 - Let the user pin one route-and-direction pair from an arrival row and remember it across launches.
 - Show the pinned route, direction arrow, and next arrival as a `minutes:seconds` countdown directly in the menu bar.
 - Follow the nearest station, advance immediately to the next matching train at zero, and show `--:--` when no upcoming matching arrival is available.
@@ -32,12 +32,11 @@ Stand Clear is a macOS menu bar app for checking nearby NYC subway arrivals at a
 ## Visual direction
 
 - Black arrival board inspired by Closing Doors.
-- Standard mode retains large colored route bullets, strong white typography, generous spacing, and simple direction arrows.
-- Compact mode reduces the menu frame and spacing without removing arrival information.
+- Colored route bullets, strong white typography, and simple direction arrows in a tight frame that keeps every piece of arrival information.
 - Unified Settings and onboarding states with Appearance and Service sections.
 - Separate, selectable northbound and southbound direction controls.
 
 ## Out of scope for the MVP
 
-- Trip planning, buses, PATH, service alerts, push notifications, multiple pins, station-specific pins, themes, automatic density, granular appearance controls, and App Store distribution.
+- Trip planning, buses, PATH, service alerts, push notifications, multiple pins, station-specific pins, themes, alternate menu layouts, granular appearance controls, and App Store distribution.
 - Changes to the Live Map layout or menu-bar label/countdown.

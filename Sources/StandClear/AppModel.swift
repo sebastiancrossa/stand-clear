@@ -33,11 +33,6 @@ struct PinnedService: Equatable {
     }
 }
 
-enum InterfaceDensity: String, CaseIterable {
-    case standard
-    case compact
-}
-
 enum ArrivalTimeDisplayMode: String, CaseIterable {
     case wholeMinutes
     case minutesAndSeconds
@@ -138,7 +133,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var selectedRoutes: Set<String>
     @Published private(set) var selectedDirections: Set<TravelDirection>
     @Published private(set) var pinnedService: PinnedService?
-    @Published private(set) var interfaceDensity: InterfaceDensity
     @Published private(set) var arrivalTimeDisplayMode: ArrivalTimeDisplayMode
     @Published private(set) var mapGeometry: TrackGeometryCatalog?
     @Published private(set) var mapMotionPlans: [TrainMotionPlan] = []
@@ -170,7 +164,6 @@ final class AppModel: ObservableObject {
         static let selectionOnboardingVersion = "selectionOnboardingVersion"
         static let pinnedRoute = "pinnedRoute"
         static let pinnedDirection = "pinnedDirection"
-        static let interfaceDensity = "interfaceDensity"
         static let arrivalTimeDisplayMode = "arrivalTimeDisplayMode"
     }
 
@@ -184,9 +177,6 @@ final class AppModel: ObservableObject {
         self.client = client
         self.defaults = defaults
         self.geometryLoader = geometryLoader
-        interfaceDensity = defaults.string(forKey: DefaultsKey.interfaceDensity)
-            .flatMap(InterfaceDensity.init(rawValue:))
-            ?? .standard
         arrivalTimeDisplayMode = defaults.string(forKey: DefaultsKey.arrivalTimeDisplayMode)
             .flatMap(ArrivalTimeDisplayMode.init(rawValue:))
             ?? .wholeMinutes
@@ -452,12 +442,6 @@ final class AppModel: ObservableObject {
         setArrivalTimeDisplayMode(
             showsMinutesAndSeconds ? .wholeMinutes : .minutesAndSeconds
         )
-    }
-
-    func setInterfaceDensity(_ density: InterfaceDensity) {
-        guard interfaceDensity != density else { return }
-        interfaceDensity = density
-        defaults.set(density.rawValue, forKey: DefaultsKey.interfaceDensity)
     }
 
     func setArrivalTimeDisplayMode(_ mode: ArrivalTimeDisplayMode) {

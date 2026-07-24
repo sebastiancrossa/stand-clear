@@ -7,7 +7,7 @@ struct StandClearMenuView: View {
     let mapWindowCoordinator: LiveMapWindowCoordinator
 
     var body: some View {
-        let metrics = MenuLayoutMetrics(density: model.interfaceDensity)
+        let metrics = MenuLayoutMetrics()
 
         ZStack {
             Color.black.ignoresSafeArea()
@@ -267,17 +267,12 @@ private struct ArrivalListView: View {
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: metrics.frameWidth - (metrics.settingsContentPadding * 2))
-                        DensityAwareActionButton(title: "Open Settings") {
+                        MenuActionButton(title: "Open Settings") {
                             model.openSettings()
                         }
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(
-                        minHeight: metrics.emptyStateTopPadding == 0
-                            ? metrics.menuContentHeight
-                            : 0
-                    )
-                    .padding(.top, metrics.emptyStateTopPadding)
+                    .frame(minHeight: metrics.menuContentHeight)
                     .padding(.horizontal, metrics.settingsContentPadding)
                 } else {
                     ForEach(TravelDirection.allCases, id: \.self) { direction in
@@ -357,7 +352,7 @@ private struct ArrivalRow: View {
                         weight: .bold,
                         design: .rounded
                     ))
-                    .lineLimit(model.interfaceDensity == .compact ? 1 : 2)
+                    .lineLimit(1)
                     .truncationMode(.tail)
                     .help(arrival.destination)
                 Text("REAL-TIME ARRIVAL")
@@ -517,7 +512,7 @@ private struct StatusView: View {
                 .frame(maxWidth: metrics.statusMaxWidth)
 
             if let actionTitle, let action {
-                DensityAwareActionButton(title: actionTitle, action: action)
+                MenuActionButton(title: actionTitle, action: action)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -525,23 +520,13 @@ private struct StatusView: View {
     }
 }
 
-private struct DensityAwareActionButton: View {
-    @Environment(\.menuLayoutMetrics) private var metrics
-
+private struct MenuActionButton: View {
     let title: String
     let action: () -> Void
 
-    @ViewBuilder
     var body: some View {
-        if metrics.statusUsesProminentActions {
-            Button(title, action: action)
-                .buttonStyle(.borderedProminent)
-                .tint(.white)
-                .foregroundStyle(.black)
-        } else {
-            Button(title, action: action)
-                .buttonStyle(.bordered)
-                .tint(.white)
-        }
+        Button(title, action: action)
+            .buttonStyle(.bordered)
+            .tint(.white)
     }
 }

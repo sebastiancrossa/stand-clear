@@ -150,35 +150,29 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(defaults.string(forKey: "arrivalTimeDisplayMode"), "wholeMinutes")
     }
 
-    func testAppearancePreferencesDefaultAndInvalidValuesFallBackSafely() {
+    func testArrivalTimePreferenceDefaultAndInvalidValueFallBackSafely() {
         let defaults = makeDefaults()
 
         var model = AppModel(defaults: defaults)
 
-        XCTAssertEqual(model.interfaceDensity, .standard)
         XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
 
-        defaults.set("wallDisplay", forKey: "interfaceDensity")
         defaults.set("tenthsOfASecond", forKey: "arrivalTimeDisplayMode")
         model = AppModel(defaults: defaults)
 
-        XCTAssertEqual(model.interfaceDensity, .standard)
         XCTAssertEqual(model.arrivalTimeDisplayMode, .wholeMinutes)
     }
 
-    func testAppearancePreferencesPersistAndRestore() {
+    func testArrivalTimePreferencePersistsAndRestores() {
         let defaults = makeDefaults()
         var model = AppModel(defaults: defaults)
 
-        model.setInterfaceDensity(.compact)
         model.setArrivalTimeDisplayMode(.minutesAndSeconds)
 
-        XCTAssertEqual(defaults.string(forKey: "interfaceDensity"), "compact")
         XCTAssertEqual(defaults.string(forKey: "arrivalTimeDisplayMode"), "minutesAndSeconds")
 
         model = AppModel(defaults: defaults)
 
-        XCTAssertEqual(model.interfaceDensity, .compact)
         XCTAssertEqual(model.arrivalTimeDisplayMode, .minutesAndSeconds)
         XCTAssertTrue(model.showsMinutesAndSeconds)
     }
