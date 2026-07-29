@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Stand Clear</string>
+    <key>CFBundleExecutable</key>
+    <string>StandClear</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.sebastiancrossa.standclear</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Stand Clear</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Stand Clear uses your location on this Mac to find the nearest NYC subway station.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>Stand Clear uses your location on this Mac to find the nearest NYC subway station.</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/sebastiancrossa/stand-clear/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>z5rdUEB3Dqas211EnQD9TwRHwAo1cHcp3kFGIlzFfK0=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
+    <true/>
+</dict>
+</plist>

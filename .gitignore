@@ -1,0 +1,14 @@
+.build/
+dist/
+.DS_Store
+*.xcuserstate
+*.p8
+*.p12
+.secrets/
+
+# Maintainer release runbook: signing identities, notary profile, Sparkle keys.
+docs/releasing.md
+
+# Local design notes kept alongside the work, not repository documentation.
+docs/superpowers/
+
