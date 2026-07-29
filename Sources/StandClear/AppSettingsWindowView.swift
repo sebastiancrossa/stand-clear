@@ -498,7 +498,9 @@ struct AppSettingsWindowView: View {
         case let .available(version):
             return SettingsRowNote(text: "Version \(version) is available", tone: .accent)
         case let .failed(message):
-            return SettingsRowNote(text: "Couldn't check for updates. \(message)", tone: .warning)
+            // Deliberately not `.warning`: nothing is broken in the app, one check just did
+            // not land. "Just now" is the load-bearing word — it says try again, not panic.
+            return SettingsRowNote(text: "Couldn't check just now. \(message)")
         }
     }
 

@@ -78,6 +78,14 @@ enum SettingsSurface {
 /// It is separate from `subtitle` because the subtitle says what a setting *is*, which
 /// does not change, and this says what is *true right now*, which does.
 struct SettingsRowNote {
+    /// How loudly the note reads.
+    ///
+    /// `warning` is red, and red is a promise that something is switched off and the rider
+    /// has to go fix it — a denied location permission, a login item that would not
+    /// register. It is not for things that merely did not happen: a failed update check
+    /// leaves the app entirely usable, so it states itself in `neutral` and lets the
+    /// "Check Now" button be the way out. Reaching for red there reports a problem the
+    /// rider does not have.
     enum Tone {
         case neutral
         case accent

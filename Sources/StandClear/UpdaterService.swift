@@ -109,19 +109,52 @@ extension SparkleUpdaterService: SPUUpdaterDelegate {
 
     nonisolated func updater(_ updater: SPUUpdater, didAbortWithError error: any Error) {
         Task { @MainActor in
-            lastCheckDate = Date()
-            // User cancellation is not a failure worth surfacing in Settings.
-            let nsError = error as NSError
-            if nsError.domain == SUSparkleErrorDomain,
-               nsError.code == Int(SUError.installationCanceledError.rawValue)
-            {
-                if case .available = state {
-                    return
-                }
+            switch SparkleAbortReason(error) {
+            case .noUpdateFound:
+                lastCheckDate = Date()
+                state = .upToDate
+            case .userDeclinedInstall:
+                // An update we already found stays found; declining to install it now is
+                // not a reason to forget it.
+                if case .available = state { return }
                 state = .idle
-                return
+            case let .checkFailed(message):
+                lastCheckDate = Date()
+                state = .failed(message)
             }
-            state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+/// Why Sparkle tore an update session down.
+///
+/// Sparkle ends *every* session — including the happy ones — by aborting the update driver
+/// with an error, so `didAbortWithError` cannot be read as "something went wrong". A check
+/// that finds nothing aborts with `SUNoUpdateError`, whose `localizedDescription` is
+/// "You're up to date!"; surfacing that verbatim is how a good outcome ends up phrased and
+/// coloured like a failure. The code has to be classified before the state can be trusted.
+enum SparkleAbortReason: Equatable {
+    /// The check completed and the running version is current.
+    case noUpdateFound
+    /// The rider dismissed or deferred an install they had been offered.
+    case userDeclinedInstall
+    /// The check genuinely did not complete — offline, unreachable feed, bad appcast.
+    case checkFailed(String)
+
+    init(_ error: any Error) {
+        let error = error as NSError
+        guard error.domain == SUSparkleErrorDomain else {
+            self = .checkFailed(error.localizedDescription)
+            return
+        }
+        switch error.code {
+        case Int(SUError.noUpdateError.rawValue):
+            self = .noUpdateFound
+        case Int(SUError.installationCanceledError.rawValue),
+             Int(SUError.installationAuthorizeLaterError.rawValue):
+            self = .userDeclinedInstall
+        default:
+            self = .checkFailed(error.localizedDescription)
         }
     }
 }

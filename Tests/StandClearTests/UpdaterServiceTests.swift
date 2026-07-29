@@ -1,3 +1,4 @@
+import Sparkle
 import StandClearCore
 import XCTest
 @testable import StandClear
@@ -84,6 +85,56 @@ final class UpdaterServiceTests: XCTestCase {
         model.setAutomaticUpdateChecksEnabled(false)
         XCTAssertFalse(model.isAutomaticUpdateChecksEnabled)
         XCTAssertFalse(updater.automaticallyChecksForUpdates)
+    }
+
+    // MARK: Abort classification
+
+    /// The regression that put "Couldn't check for updates. You're up to date!" on screen in
+    /// red: Sparkle signs off a successful, nothing-found check by aborting with this error.
+    func testNoUpdateErrorIsNotAFailure() {
+        let reason = SparkleAbortReason(sparkleError(.noUpdateError, description: "You’re up to date!"))
+
+        XCTAssertEqual(reason, .noUpdateFound)
+    }
+
+    func testDeclinedInstallIsNotAFailure() {
+        XCTAssertEqual(
+            SparkleAbortReason(sparkleError(.installationCanceledError)),
+            .userDeclinedInstall
+        )
+        XCTAssertEqual(
+            SparkleAbortReason(sparkleError(.installationAuthorizeLaterError)),
+            .userDeclinedInstall
+        )
+    }
+
+    func testUnreachableFeedIsAFailure() {
+        let reason = SparkleAbortReason(sparkleError(.downloadError, description: "No internet."))
+
+        XCTAssertEqual(reason, .checkFailed("No internet."))
+    }
+
+    /// Sparkle surfaces `URLError`s and friends untranslated, so a foreign domain carrying
+    /// code 1001 must not be mistaken for `SUNoUpdateError`.
+    func testForeignErrorSharingANoUpdateCodeIsAFailure() {
+        let error = NSError(
+            domain: NSURLErrorDomain,
+            code: Int(SUError.noUpdateError.rawValue),
+            userInfo: [NSLocalizedDescriptionKey: "The request timed out."]
+        )
+
+        XCTAssertEqual(SparkleAbortReason(error), .checkFailed("The request timed out."))
+    }
+
+    private func sparkleError(
+        _ code: SUError,
+        description: String = "Something went wrong."
+    ) -> NSError {
+        NSError(
+            domain: SUSparkleErrorDomain,
+            code: Int(code.rawValue),
+            userInfo: [NSLocalizedDescriptionKey: description]
+        )
     }
 }
 
