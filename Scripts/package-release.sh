@@ -16,6 +16,20 @@ readonly APP_ICON="$APP_DIR/Contents/Resources/AppIcon.icns"
 readonly SOURCE_ICON="$REPO_ROOT/Support/AppIcon.icns"
 readonly ENTITLEMENTS="$REPO_ROOT/Support/StandClear.entitlements"
 readonly OUTPUT_DIR="$REPO_ROOT/dist/release"
+# The installer window and the artwork drawn behind it are one measurement: the
+# background is positioned for icons at these exact coordinates, so the window size
+# and the image size have to move together or the composition slides out of register.
+#
+# Finder counts its title bar inside these bounds but draws the background below it, so
+# roughly 31pt of the image never appears, and a Mac set to always-on scroll bars loses
+# another ~16pt at the bottom. The window is sized taller than the composition needs and
+# the artwork keeps its lower band empty, which is why the height is 420 for a layout
+# that reads as 560×373.
+readonly DMG_WINDOW_WIDTH=560
+readonly DMG_WINDOW_HEIGHT=420
+readonly DMG_ICON_CENTER_Y=180
+readonly DMG_BACKGROUND_1X="$REPO_ROOT/Support/dmg/background.png"
+readonly DMG_BACKGROUND_2X="$REPO_ROOT/Support/dmg/background@2x.png"
 readonly CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 readonly NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 
@@ -33,6 +47,8 @@ readonly CHECKSUM_PATH="$DMG_PATH.sha256"
 VERIFY_DIR=""
 NOTARY_ZIP=""
 DMG_MOUNT=""
+BACKGROUND_DIR=""
+BACKGROUND_TIFF=""
 PACKAGE_SUCCEEDED=0
 TEAM_ID=""
 
@@ -64,6 +80,9 @@ cleanup() {
     fi
     if [[ -n "$NOTARY_ZIP" && -f "$NOTARY_ZIP" ]]; then
         rm -f "$NOTARY_ZIP"
+    fi
+    if [[ -n "$BACKGROUND_DIR" && -d "$BACKGROUND_DIR" ]]; then
+        rm -rf "$BACKGROUND_DIR"
     fi
     if [[ -d "$STAGING_DIR" ]]; then
         unregister_bundle "$STAGING_DIR/$APP_NAME.app"
@@ -207,8 +226,37 @@ notarize_and_staple_app() {
     /usr/bin/xcrun stapler validate "$APP_DIR" || die "stapler validate failed after stapling app"
 }
 
+image_dimensions() {
+    local path="$1"
+    /usr/bin/sips -g pixelWidth -g pixelHeight "$path" 2>/dev/null \
+        | /usr/bin/awk '/pixelWidth/ {w=$2} /pixelHeight/ {h=$2} END {print w "x" h}'
+}
+
+# Finder picks the matching representation out of a multi-resolution TIFF, so the
+# installer window stays crisp on Retina instead of scaling the 1x art up. The pair of
+# PNGs is what gets designed and reviewed; the TIFF only exists inside the DMG.
+build_background() {
+    local expected_1x="${DMG_WINDOW_WIDTH}x${DMG_WINDOW_HEIGHT}"
+    local expected_2x="$((DMG_WINDOW_WIDTH * 2))x$((DMG_WINDOW_HEIGHT * 2))"
+    local actual_1x
+    local actual_2x
+
+    actual_1x="$(image_dimensions "$DMG_BACKGROUND_1X")"
+    actual_2x="$(image_dimensions "$DMG_BACKGROUND_2X")"
+    [[ "$actual_1x" == "$expected_1x" ]] || die "DMG background must be $expected_1x, found $actual_1x in $DMG_BACKGROUND_1X"
+    [[ "$actual_2x" == "$expected_2x" ]] || die "DMG background @2x must be $expected_2x, found $actual_2x in $DMG_BACKGROUND_2X"
+
+    BACKGROUND_DIR="$(mktemp -d "${TMPDIR:-/tmp}/standclear-dmg-background.XXXXXX")"
+    BACKGROUND_TIFF="$BACKGROUND_DIR/background.tiff"
+    /usr/bin/tiffutil -cathidpicheck "$DMG_BACKGROUND_1X" "$DMG_BACKGROUND_2X" -out "$BACKGROUND_TIFF" >/dev/null \
+        || die "tiffutil failed to combine the DMG background images"
+    [[ -f "$BACKGROUND_TIFF" ]] || die "tiffutil did not produce $BACKGROUND_TIFF"
+}
+
 build_dmg() {
     command -v create-dmg >/dev/null 2>&1 || die "create-dmg not found; install with: brew install create-dmg"
+
+    build_background
 
     rm -rf "$STAGING_DIR"
     mkdir -p "$OUTPUT_DIR" "$STAGING_DIR"
@@ -218,11 +266,12 @@ build_dmg() {
     create-dmg --overwrite \
         --volname "Stand Clear" \
         --volicon "$SOURCE_ICON" \
-        --window-size 560 380 \
+        --background "$BACKGROUND_TIFF" \
+        --window-size "$DMG_WINDOW_WIDTH" "$DMG_WINDOW_HEIGHT" \
         --icon-size 128 \
-        --icon "$APP_NAME.app" 150 190 \
+        --icon "$APP_NAME.app" 150 "$DMG_ICON_CENTER_Y" \
         --hide-extension "$APP_NAME.app" \
-        --app-drop-link 410 190 \
+        --app-drop-link 410 "$DMG_ICON_CENTER_Y" \
         --codesign "$CODESIGN_IDENTITY" \
         --notarize "$NOTARY_PROFILE" \
         "$DMG_PATH" \
@@ -253,6 +302,9 @@ verify_dmg() {
 
     mounted_app="$DMG_MOUNT/$APP_NAME.app"
     [[ -d "$mounted_app" ]] || die "DMG is missing $APP_NAME.app"
+    # A background that failed to copy leaves a plain white window rather than an error,
+    # so the only way to notice is to look for it on the mounted volume.
+    [[ -f "$DMG_MOUNT/.background/background.tiff" ]] || die "DMG is missing its window background"
 
     /bin/cp -R "$mounted_app" "$VERIFY_DIR/$APP_NAME.app"
     /usr/bin/hdiutil detach "$DMG_MOUNT" -quiet
@@ -294,6 +346,8 @@ fi
 
 [[ -f "$SOURCE_ICON" ]] || die "missing source app icon at Support/AppIcon.icns"
 [[ -f "$ENTITLEMENTS" ]] || die "missing entitlements at Support/StandClear.entitlements"
+[[ -f "$DMG_BACKGROUND_1X" ]] || die "missing DMG background at Support/dmg/background.png"
+[[ -f "$DMG_BACKGROUND_2X" ]] || die "missing DMG background at Support/dmg/background@2x.png"
 [[ "$STAGING_DIR" == "$OUTPUT_DIR/"* ]] || die "refusing unsafe staging path"
 [[ ! -e "$DMG_PATH" && ! -e "$CHECKSUM_PATH" ]] || die "release artifact already exists; use a new version or PRERELEASE and increment BUILD_NUMBER"
 
