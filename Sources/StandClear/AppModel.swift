@@ -265,6 +265,7 @@ final class AppModel: ObservableObject {
     let locationService = LocationService()
     let launchAtLogin: any LaunchAtLoginControlling
     let softwareUpdater: any SoftwareUpdating
+    let crashReporter: any CrashReporting
 
     private let client: any SystemFeedFetching
     private let alertsClient: any ServiceAlertFetching
@@ -360,7 +361,8 @@ final class AppModel: ObservableObject {
         defaults: UserDefaults = .standard,
         geometryLoader: any TrackGeometryLoading = BundledTrackGeometryLoader(),
         launchAtLogin: (any LaunchAtLoginControlling)? = nil,
-        softwareUpdater: (any SoftwareUpdating)? = nil
+        softwareUpdater: (any SoftwareUpdating)? = nil,
+        crashReporter: (any CrashReporting)? = nil
     ) {
         self.client = client
         self.alertsClient = alertsClient
@@ -368,6 +370,7 @@ final class AppModel: ObservableObject {
         self.geometryLoader = geometryLoader
         self.launchAtLogin = launchAtLogin ?? LaunchAtLoginService()
         self.softwareUpdater = softwareUpdater ?? SparkleUpdaterService()
+        self.crashReporter = crashReporter ?? SentryCrashReportingService(defaults: defaults)
         // The countdown is the format the board is built around — it is what the menu
         // bar already shows for a pinned train — so it is what a rider who has never
         // opened Settings gets. Setup no longer asks; clicking any ETA still switches.
@@ -593,6 +596,15 @@ final class AppModel: ObservableObject {
 
     func setAutomaticUpdateChecksEnabled(_ enabled: Bool) {
         softwareUpdater.setAutomaticallyChecksForUpdates(enabled)
+        objectWillChange.send()
+    }
+
+    var isCrashReportingEnabled: Bool {
+        crashReporter.isEnabled
+    }
+
+    func setCrashReportingEnabled(_ enabled: Bool) {
+        crashReporter.setEnabled(enabled)
         objectWillChange.send()
     }
 

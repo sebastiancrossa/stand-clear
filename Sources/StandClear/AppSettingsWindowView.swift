@@ -203,6 +203,24 @@ struct AppSettingsWindowView: View {
         .task {
             model.refreshSoftwareUpdateInformation()
         }
+
+        SettingsCard {
+            SettingsRow(
+                symbol: "ladybug",
+                title: "Crash Reports",
+                subtitle: "Send crash reports so bugs get fixed. No location or personal data is included."
+            ) {
+                Toggle(
+                    "Crash Reports",
+                    isOn: Binding(
+                        get: { model.isCrashReportingEnabled },
+                        set: model.setCrashReportingEnabled
+                    )
+                )
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+        }
     }
 
     // MARK: Menu Bar

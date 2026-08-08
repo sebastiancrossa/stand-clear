@@ -1026,6 +1026,26 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.expandedStationID)
     }
 
+    func testCrashReportingToggleDelegatesToService() {
+        let crashReporter = PreviewCrashReportingService(isEnabled: true)
+        let model = AppModel(
+            defaults: makeDefaults(),
+            crashReporter: crashReporter
+        )
+
+        XCTAssertTrue(model.isCrashReportingEnabled)
+
+        model.setCrashReportingEnabled(false)
+        XCTAssertFalse(model.isCrashReportingEnabled)
+        XCTAssertFalse(crashReporter.isEnabled)
+        XCTAssertEqual(crashReporter.setEnabledCallCount, 1)
+
+        model.setCrashReportingEnabled(true)
+        XCTAssertTrue(model.isCrashReportingEnabled)
+        XCTAssertTrue(crashReporter.isEnabled)
+        XCTAssertEqual(crashReporter.setEnabledCallCount, 2)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "AppModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!

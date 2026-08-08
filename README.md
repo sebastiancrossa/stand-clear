@@ -32,6 +32,7 @@ Station metadata and live arrival data come directly from the [MTA developer fee
 - **Service alerts** — a banner surfaces MTA disruptions on your selected lines, with affected routes rendered as real route bullets; the Settings route grid badges affected lines too.
 - **Fast and small** — a compact 340×480 menu with 44‑point rows, refreshing every 30 seconds, built to be light on memory.
 - **Automatic updates** — checks for new versions in the background by default; turn that off in Settings → General if you prefer to check manually, then install with one click when an update is available.
+- **Crash reports** — on by default so bugs can be fixed; turn them off in Settings → General → Crash Reports.
 
 ## Requirements
 
@@ -95,6 +96,8 @@ make refresh-stops
 ## Privacy
 
 Stand Clear uses Core Location to choose nearby stations. Coordinates stay on the Mac and are never sent to the MTA or any other service.
+
+Crash reporting is on by default. When a crash or uncaught error happens, Stand Clear may send a stack trace, the app version, and the macOS version to Sentry so the issue can be fixed. Location and other personal data are not included. Turn this off anytime in Settings → General → Crash Reports.
 
 ## Data and trademarks
 

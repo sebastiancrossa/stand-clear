@@ -7,8 +7,9 @@ struct StandClearApp: App {
     private let settingsWindowCoordinator: LiveMapWindowCoordinator
 
     init() {
-        CrashReportingService.start()
-        let model = AppModel()
+        let crashReporter = SentryCrashReportingService()
+        crashReporter.start()
+        let model = AppModel(crashReporter: crashReporter)
         _model = StateObject(wrappedValue: model)
         mapWindowCoordinator = LiveMapWindowCoordinator()
         settingsWindowCoordinator = LiveMapWindowCoordinator()
