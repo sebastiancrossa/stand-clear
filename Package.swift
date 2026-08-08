@@ -21,6 +21,10 @@ let package = Package(
             url: "https://github.com/sparkle-project/Sparkle",
             from: "2.9.0"
         ),
+        .package(
+            url: "https://github.com/getsentry/sentry-cocoa",
+            from: "9.24.0"
+        ),
     ],
     targets: [
         .target(
@@ -46,6 +50,7 @@ let package = Package(
             dependencies: [
                 "StandClearCore",
                 .product(name: "Sparkle", package: "Sparkle"),
+                .product(name: "Sentry", package: "sentry-cocoa"),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [

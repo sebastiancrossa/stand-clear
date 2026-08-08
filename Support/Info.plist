@@ -42,5 +42,7 @@
     <false/>
     <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
+    <key>SentryDSN</key>
+    <string>https://33e105f17d2d156b986be1349c459c0c@o4509986601762821.ingest.us.sentry.io/4511872370540544</string>
 </dict>
 </plist>

@@ -7,6 +7,7 @@ struct StandClearApp: App {
     private let settingsWindowCoordinator: LiveMapWindowCoordinator
 
     init() {
+        CrashReportingService.start()
         let model = AppModel()
         _model = StateObject(wrappedValue: model)
         mapWindowCoordinator = LiveMapWindowCoordinator()
