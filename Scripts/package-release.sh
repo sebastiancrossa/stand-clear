@@ -32,6 +32,9 @@ readonly DMG_BACKGROUND_1X="$REPO_ROOT/Support/dmg/background.png"
 readonly DMG_BACKGROUND_2X="$REPO_ROOT/Support/dmg/background@2x.png"
 readonly CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-}"
 readonly NOTARY_PROFILE="${NOTARY_PROFILE:-}"
+readonly SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN:-}"
+readonly SENTRY_ORG="${SENTRY_ORG:-zeroeval}"
+readonly SENTRY_PROJECT="${SENTRY_PROJECT:-apple-ios}"
 
 if [[ -n "$PRERELEASE" ]]; then
     readonly ARTIFACT_LABEL="$RELEASE_VERSION-$PRERELEASE"
@@ -316,6 +319,10 @@ verify_dmg() {
 [[ -n "$CODESIGN_IDENTITY" ]] || die "CODESIGN_IDENTITY is required (example: 'Developer ID Application: Sebastian Crossa (AB12CD34EF)')"
 [[ "$CODESIGN_IDENTITY" != "-" ]] || die "CODESIGN_IDENTITY must be a Developer ID Application identity, not ad-hoc (-)"
 [[ -n "$NOTARY_PROFILE" ]] || die "NOTARY_PROFILE is required (example: standclear-notary). Store credentials with: xcrun notarytool store-credentials"
+command -v sentry-cli >/dev/null 2>&1 || die "sentry-cli not found; install with: brew install getsentry/tools/sentry-cli"
+# Accept either an exported token or one stored by `sentry-cli login` (~/.sentryclirc).
+sentry-cli info >/dev/null 2>&1 \
+    || die "sentry-cli is not authenticated; run: sentry-cli login (or export SENTRY_AUTH_TOKEN)"
 
 parse_team_id "$CODESIGN_IDENTITY"
 
@@ -374,6 +381,7 @@ echo "Building app bundle with Developer ID signing"
     --sign "$CODESIGN_IDENTITY" "$APP_DIR"
 
 verify_app "$APP_DIR" 0
+"$REPO_ROOT/Scripts/upload-dsyms.sh" "$APP_DIR"
 notarize_and_staple_app
 verify_app "$APP_DIR" 1
 build_dmg
