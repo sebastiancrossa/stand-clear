@@ -25,6 +25,10 @@ let package = Package(
             url: "https://github.com/getsentry/sentry-cocoa",
             from: "9.24.0"
         ),
+        .package(
+            url: "https://github.com/PostHog/posthog-ios.git",
+            from: "3.89.0"
+        ),
     ],
     targets: [
         .target(
@@ -51,6 +55,7 @@ let package = Package(
                 "StandClearCore",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Sentry", package: "sentry-cocoa"),
+                .product(name: "PostHog", package: "posthog-ios"),
             ],
             swiftSettings: [.swiftLanguageMode(.v5)],
             linkerSettings: [

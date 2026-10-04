@@ -33,6 +33,7 @@ Station metadata and live arrival data come directly from the [MTA developer fee
 - **Fast and small** — a compact 340×480 menu with 44‑point rows, refreshing every 30 seconds, built to be light on memory.
 - **Automatic updates** — checks for new versions in the background by default; turn that off in Settings → General if you prefer to check manually, then install with one click when an update is available.
 - **Crash reports** — on by default so bugs can be fixed; turn them off in Settings → General → Crash Reports.
+- **Anonymous usage analytics** — on by default so we know what to improve; turn them off in Settings → General → Usage Analytics.
 
 ## Requirements
 
@@ -98,6 +99,8 @@ make refresh-stops
 Stand Clear uses Core Location to choose nearby stations. Coordinates stay on the Mac and are never sent to the MTA or any other service.
 
 Crash reporting is on by default. When a crash or uncaught error happens, Stand Clear may send a stack trace, the app version, and the macOS version to Sentry so the issue can be fixed. Location and other personal data are not included. Turn this off anytime in Settings → General → Crash Reports.
+
+Anonymous usage analytics are on by default in official releases. Stand Clear may send an anonymous random ID, the event name (for example first launch, finished setup, menu opened, or a feature such as pinning a countdown), the app version, and the macOS version to PostHog. Coordinates, station names or IDs, selected lines, and IP-derived location are never sent. Builds from source and debug builds send nothing. Turn this off anytime in Settings → General → Usage Analytics.
 
 ## Data and trademarks
 

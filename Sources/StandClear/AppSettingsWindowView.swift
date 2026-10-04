@@ -35,6 +35,10 @@ struct AppSettingsWindowView: View {
         // no colours of its own to fix — pinning the appearance is what keeps it the
         // same window the popover opens on a Mac in either mode.
         .forcesDarkAppearance()
+        .onAppear { model.recordSettingsPaneViewed(selectedPane) }
+        .onChange(of: selectedPane) { _, pane in
+            model.recordSettingsPaneViewed(pane)
+        }
     }
 
     // MARK: Chrome
@@ -215,6 +219,24 @@ struct AppSettingsWindowView: View {
                     isOn: Binding(
                         get: { model.isCrashReportingEnabled },
                         set: model.setCrashReportingEnabled
+                    )
+                )
+                .toggleStyle(.switch)
+                .labelsHidden()
+            }
+        }
+
+        SettingsCard {
+            SettingsRow(
+                symbol: "chart.bar",
+                title: "Usage Analytics",
+                subtitle: "Share anonymous usage so we know what to improve. No location or personal data is included."
+            ) {
+                Toggle(
+                    "Usage Analytics",
+                    isOn: Binding(
+                        get: { model.isAnalyticsEnabled },
+                        set: model.setAnalyticsEnabled
                     )
                 )
                 .toggleStyle(.switch)

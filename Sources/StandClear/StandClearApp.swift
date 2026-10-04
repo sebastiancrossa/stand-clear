@@ -9,7 +9,9 @@ struct StandClearApp: App {
     init() {
         let crashReporter = SentryCrashReportingService()
         crashReporter.start()
-        let model = AppModel(crashReporter: crashReporter)
+        let analytics = PostHogAnalyticsService()
+        analytics.start()
+        let model = AppModel(crashReporter: crashReporter, analytics: analytics)
         _model = StateObject(wrappedValue: model)
         mapWindowCoordinator = LiveMapWindowCoordinator()
         settingsWindowCoordinator = LiveMapWindowCoordinator()

@@ -35,6 +35,8 @@ readonly NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 readonly SENTRY_AUTH_TOKEN="${SENTRY_AUTH_TOKEN:-}"
 readonly SENTRY_ORG="${SENTRY_ORG:-zeroeval}"
 readonly SENTRY_PROJECT="${SENTRY_PROJECT:-apple-ios}"
+readonly POSTHOG_PROJECT_API_KEY="${POSTHOG_PROJECT_API_KEY:-}"
+readonly POSTHOG_HOST="${POSTHOG_HOST:-https://us.i.posthog.com}"
 
 if [[ -n "$PRERELEASE" ]]; then
     readonly ARTIFACT_LABEL="$RELEASE_VERSION-$PRERELEASE"
@@ -148,6 +150,8 @@ verify_app() {
     [[ "$(plist_value "$plist_path" SUEnableAutomaticChecks)" == "true" ]] || die "SUEnableAutomaticChecks must be true"
     [[ "$(plist_value "$plist_path" SUAllowsAutomaticUpdates)" == "false" ]] || die "SUAllowsAutomaticUpdates must be false"
     [[ "$(plist_value "$plist_path" SUVerifyUpdateBeforeExtraction)" == "true" ]] || die "SUVerifyUpdateBeforeExtraction must be true"
+    [[ "$(plist_value "$plist_path" PostHogAPIKey)" == "$POSTHOG_PROJECT_API_KEY" ]] || die "unexpected PostHogAPIKey"
+    [[ "$(plist_value "$plist_path" PostHogHost)" == "$POSTHOG_HOST" ]] || die "unexpected PostHogHost"
 
     location_description="$(plist_value "$plist_path" NSLocationWhenInUseUsageDescription)"
     [[ -n "$location_description" ]] || die "missing location usage description"
@@ -316,6 +320,9 @@ verify_dmg() {
     verify_app "$VERIFY_DIR/$APP_NAME.app" 1
 }
 
+[[ -n "$POSTHOG_PROJECT_API_KEY" ]] || die "POSTHOG_PROJECT_API_KEY is required (the StandClear (App) PostHog project key)"
+[[ "$POSTHOG_HOST" == https://* ]] || die "POSTHOG_HOST must be an https URL"
+
 [[ -n "$CODESIGN_IDENTITY" ]] || die "CODESIGN_IDENTITY is required (example: 'Developer ID Application: Sebastian Crossa (AB12CD34EF)')"
 [[ "$CODESIGN_IDENTITY" != "-" ]] || die "CODESIGN_IDENTITY must be a Developer ID Application identity, not ad-hoc (-)"
 [[ -n "$NOTARY_PROFILE" ]] || die "NOTARY_PROFILE is required (example: standclear-notary). Store credentials with: xcrun notarytool store-credentials"
@@ -376,6 +383,8 @@ echo "Building app bundle with Developer ID signing"
 # Version stamp invalidates the prior signature; re-sign afterward.
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $RELEASE_VERSION" "$INFO_PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :PostHogAPIKey string $POSTHOG_PROJECT_API_KEY" "$INFO_PLIST"
+/usr/libexec/PlistBuddy -c "Add :PostHogHost string $POSTHOG_HOST" "$INFO_PLIST"
 /usr/bin/codesign --force --options runtime --timestamp \
     --entitlements "$ENTITLEMENTS" \
     --sign "$CODESIGN_IDENTITY" "$APP_DIR"

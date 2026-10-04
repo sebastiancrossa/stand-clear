@@ -14,6 +14,7 @@ struct ServiceAlertSection: View {
     let alerts: [ServiceAlert]
     let now: Date
     let isCollapsible: Bool
+    let onExpand: () -> Void
 
     @State private var isExpanded = false
     @State private var isHovered = false
@@ -51,6 +52,9 @@ struct ServiceAlertSection: View {
     private var strip: some View {
         Button {
             isExpanded.toggle()
+            if isExpanded {
+                onExpand()
+            }
         } label: {
             HStack(spacing: metrics.arrivalRowItemSpacing / 2) {
                 stripLabel

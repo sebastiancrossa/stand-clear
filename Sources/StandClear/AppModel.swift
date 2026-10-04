@@ -266,6 +266,7 @@ final class AppModel: ObservableObject {
     let launchAtLogin: any LaunchAtLoginControlling
     let softwareUpdater: any SoftwareUpdating
     let crashReporter: any CrashReporting
+    let analytics: any AnalyticsTracking
 
     private let client: any SystemFeedFetching
     private let alertsClient: any ServiceAlertFetching
@@ -298,6 +299,8 @@ final class AppModel: ObservableObject {
         static let menuBarDisplayMode = "menuBarDisplayMode"
         static let menuBarShowRouteColor = "menuBarShowRouteColor"
         static let menuBarHideWhenIdle = "menuBarHideWhenIdle"
+        static let analyticsInstallRecorded = "analyticsInstallRecorded"
+        static let analyticsLastActiveDay = "analyticsLastActiveDay"
 
         // Written by builds that allowed selecting both directions at once. Read
         // once during migration, then removed.
@@ -362,7 +365,8 @@ final class AppModel: ObservableObject {
         geometryLoader: any TrackGeometryLoading = BundledTrackGeometryLoader(),
         launchAtLogin: (any LaunchAtLoginControlling)? = nil,
         softwareUpdater: (any SoftwareUpdating)? = nil,
-        crashReporter: (any CrashReporting)? = nil
+        crashReporter: (any CrashReporting)? = nil,
+        analytics: (any AnalyticsTracking)? = nil
     ) {
         self.client = client
         self.alertsClient = alertsClient
@@ -371,6 +375,7 @@ final class AppModel: ObservableObject {
         self.launchAtLogin = launchAtLogin ?? LaunchAtLoginService()
         self.softwareUpdater = softwareUpdater ?? SparkleUpdaterService()
         self.crashReporter = crashReporter ?? SentryCrashReportingService(defaults: defaults)
+        self.analytics = analytics ?? PostHogAnalyticsService(defaults: defaults)
         // The countdown is the format the board is built around — it is what the menu
         // bar already shows for a pinned train — so it is what a rider who has never
         // opened Settings gets. Setup no longer asks; clicking any ETA still switches.
@@ -579,6 +584,8 @@ final class AppModel: ObservableObject {
         softwareUpdater.start()
         startBackgroundTimers()
         updateCountdownTimer()
+        recordInstallIfNeeded()
+        recordDailyActiveIfNeeded()
         Task { await refresh() }
         Task { await refreshAlerts() }
     }
@@ -608,6 +615,15 @@ final class AppModel: ObservableObject {
         objectWillChange.send()
     }
 
+    var isAnalyticsEnabled: Bool {
+        analytics.isEnabled
+    }
+
+    func setAnalyticsEnabled(_ enabled: Bool) {
+        analytics.setEnabled(enabled)
+        objectWillChange.send()
+    }
+
     func checkForSoftwareUpdates() {
         softwareUpdater.checkForUpdates()
         objectWillChange.send()
@@ -623,6 +639,7 @@ final class AppModel: ObservableObject {
         isMenuPopoverActive = active
         if active {
             now = Date()
+            analytics.capture(.boardOpened)
         }
         updateCountdownTimer()
     }
@@ -633,6 +650,7 @@ final class AppModel: ObservableObject {
         if active {
             now = Date()
             updateCountdownTimer()
+            analytics.capture(.liveMapOpened)
             // Pull train observations as soon as the map opens, but only once
             // the app has started its normal refresh loop (tests seed snapshots
             // without calling start()).
@@ -789,6 +807,9 @@ final class AppModel: ObservableObject {
     func toggleStationExpanded(_ stationID: String) {
         guard nearbyStations.contains(where: { $0.id == stationID }) else { return }
         expandedStationID = expandedStationID == stationID ? nil : stationID
+        if expandedStationID != nil {
+            analytics.capture(.stationExpanded)
+        }
     }
 
     func collapseExpandedStation() {
@@ -808,6 +829,9 @@ final class AppModel: ObservableObject {
         guard selectedDirection != direction else { return }
         selectedDirection = direction
         persistDirection()
+        if !isOnboarding {
+            analytics.capture(.directionSwitched(direction))
+        }
     }
 
     /// Flips to the opposite direction while leaving the pin alone, so the menu bar
@@ -824,11 +848,14 @@ final class AppModel: ObservableObject {
         guard selectedDirection != nil else { return }
         isPinned.toggle()
         persistPin()
+        analytics.capture(isPinned ? .countdownPinned : .countdownUnpinned)
     }
 
     func clearPin() {
+        guard isPinned else { return }
         isPinned = false
         persistPin()
+        analytics.capture(.countdownUnpinned)
     }
 
     func toggleArrivalTimeDisplay() {
@@ -841,6 +868,7 @@ final class AppModel: ObservableObject {
         guard arrivalTimeDisplayMode != mode else { return }
         arrivalTimeDisplayMode = mode
         defaults.set(mode.rawValue, forKey: DefaultsKey.arrivalTimeDisplayMode)
+        analytics.capture(.timeFormatChanged(mode))
     }
 
     func requestManualRefresh() {
@@ -940,6 +968,9 @@ final class AppModel: ObservableObject {
 
     func openSettings(section: SettingsSection) {
         settingsPresentation = hasConfiguredSelection ? .settings(section) : .onboarding
+        if hasConfiguredSelection {
+            analytics.capture(.settingsOpened(pane: "lines"))
+        }
     }
 
     func closeSettings() {
@@ -958,6 +989,17 @@ final class AppModel: ObservableObject {
             forKey: DefaultsKey.selectionOnboardingVersion
         )
         settingsPresentation = .hidden
+        analytics.capture(
+            .setupCompleted(lineCount: selectedRoutes.intersection(availableRoutes).count)
+        )
+    }
+
+    func recordAlertsExpanded() {
+        analytics.capture(.alertOpened)
+    }
+
+    func recordSettingsPaneViewed(_ pane: AppSettingsTab) {
+        analytics.capture(.settingsOpened(pane: pane.rawValue))
     }
 
     func openLocationSettings() {
@@ -1108,11 +1150,32 @@ final class AppModel: ObservableObject {
         updateCountdownTimer()
     }
 
+    private func recordInstallIfNeeded() {
+        guard !defaults.bool(forKey: DefaultsKey.analyticsInstallRecorded) else { return }
+        analytics.capture(
+            .appInstalled(existingUser: defaults.bool(forKey: DefaultsKey.hasConfiguredLines))
+        )
+        defaults.set(true, forKey: DefaultsKey.analyticsInstallRecorded)
+    }
+
+    private func recordDailyActiveIfNeeded() {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar.current
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone.current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let today = formatter.string(from: Date())
+        guard defaults.string(forKey: DefaultsKey.analyticsLastActiveDay) != today else { return }
+        analytics.capture(.appActive)
+        defaults.set(today, forKey: DefaultsKey.analyticsLastActiveDay)
+    }
+
     private func startBackgroundTimers() {
         refreshTimer = Timer.publish(every: Self.feedRefreshInterval, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
+                self.recordDailyActiveIfNeeded()
                 Task { await self.refresh() }
             }
         alertTimer = Timer.publish(every: Self.alertRefreshInterval, on: .main, in: .common)

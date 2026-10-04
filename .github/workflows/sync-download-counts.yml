@@ -1,0 +1,57 @@
+name: Sync download counts
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      POSTHOG_PROJECT_API_KEY: ${{ secrets.POSTHOG_PROJECT_API_KEY }}
+      POSTHOG_HOST: ${{ vars.POSTHOG_HOST || 'https://us.i.posthog.com' }}
+    steps:
+      - name: Send GitHub DMG download totals to PostHog
+        run: |
+          set -euo pipefail
+          : "${POSTHOG_PROJECT_API_KEY:?POSTHOG_PROJECT_API_KEY is required}"
+          : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+
+          pages="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases")"
+          releases="$(printf '%s' "$pages" | jq -s 'add')"
+
+          payload="$(jq -c '
+            [
+              .[] as $rel
+              | $rel.assets[]
+              | select(.name | endswith(".dmg"))
+              | {tag: $rel.tag_name, count: .download_count}
+            ]
+            | {
+                total_dmg_downloads: (map(.count) | add // 0),
+                downloads_by_release: (
+                  reduce .[] as $item ({}; .[$item.tag] += $item.count)
+                )
+              }
+          ' <<< "$releases")"
+
+          body="$(jq -n \
+            --arg api_key "$POSTHOG_PROJECT_API_KEY" \
+            --argjson properties "$payload" \
+            '{
+              api_key: $api_key,
+              event: "github_downloads_snapshot",
+              distinct_id: "github-downloads-sync",
+              properties: ($properties + {"$process_person_profile": false})
+            }')"
+
+          curl -fsS -X POST "${POSTHOG_HOST%/}/i/v0/e/" \
+            -H "Content-Type: application/json" \
+            -d "$body"
+
+          echo "Sent github_downloads_snapshot: $payload"

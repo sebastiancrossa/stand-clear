@@ -315,7 +315,8 @@ private struct ArrivalListView: View {
                     ServiceAlertSection(
                         alerts: model.activeAlerts,
                         now: model.now,
-                        isCollapsible: !alertsExplainEmptyBoard
+                        isCollapsible: !alertsExplainEmptyBoard,
+                        onExpand: model.recordAlertsExpanded
                     )
                 }
 
